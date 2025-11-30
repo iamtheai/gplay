@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { PlayerColor, Token } from '../types';
-import { Trophy, Star, ChevronRight, Share2, Copy, Check, Users, X } from 'lucide-react';
+import { Trophy, Star, ChevronRight, Share2, Copy, Check, Users, X, Radio, Loader2 } from 'lucide-react';
+// @ts-ignore
+import { Peer } from 'peerjs';
 
 // --- CONSTANTS ---
 const BOARD_SIZE = 15;
@@ -69,6 +71,12 @@ const INITIAL_TOKENS: Record<PlayerColor, Token[]> = {
   [PlayerColor.YELLOW]: [0, 1, 2, 3].map(id => ({ id, color: PlayerColor.YELLOW, position: -1, isSafe: true })),
 };
 
+// --- MULTIPLAYER ACTION TYPES ---
+type GameAction = 
+  | { type: 'ROLL_DICE'; value: number }
+  | { type: 'MOVE_TOKEN'; color: PlayerColor; tokenId: number }
+  | { type: 'SYNC_STATE'; state: any };
+
 // --- MAIN COMPONENT ---
 
 export const LudoBoard: React.FC = () => {
@@ -85,27 +93,165 @@ export const LudoBoard: React.FC = () => {
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [inviteUrl, setInviteUrl] = useState('');
   const [isCopied, setIsCopied] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isPeerInit, setIsPeerInit] = useState(false);
+  
+  const peerRef = useRef<any>(null);
+  const connRef = useRef<any[]>([]); // Array to support multiple connections (Host)
 
   // Audio Refs
   const tokenAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const turnOrder = [PlayerColor.GREEN, PlayerColor.RED, PlayerColor.BLUE, PlayerColor.YELLOW];
 
-  // Check for room code in URL on mount and Init Audio
+  // --- MULTIPLAYER LOGIC ---
+  
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const room = params.get('room');
-    if (room) {
-        setRoomCode(room);
-        setMessage("Joined Room: " + room);
-    }
-    
-    // Initialize Token Sound
-    tokenAudioRef.current = new Audio("https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3"); // A crisp click/thak sound
-    tokenAudioRef.current.volume = 0.6;
-    tokenAudioRef.current.preload = "auto";
+      // Init Audio
+      tokenAudioRef.current = new Audio("https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3");
+      tokenAudioRef.current.volume = 0.6;
+      tokenAudioRef.current.preload = "auto";
 
-  }, []);
+      const params = new URLSearchParams(window.location.search);
+      const room = params.get('room');
+
+      // Initialize PeerJS
+      const initPeer = async () => {
+          if (isPeerInit) return;
+          setIsPeerInit(true);
+
+          let myId = room ? undefined : `PG-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+          // If room exists in URL, we are joining (random ID). If not, we are host (Fixed ID).
+          
+          const peer = new Peer(myId, {
+            debug: 1
+          });
+          
+          peerRef.current = peer;
+
+          peer.on('open', (id: string) => {
+              console.log('My Peer ID:', id);
+              if (!room) {
+                  setRoomCode(id); // Host sets the room code
+                  setMessage("Room Created. Invite friends!");
+              } else {
+                  // Connect to Host
+                  console.log('Connecting to host:', room);
+                  const conn = peer.connect(room);
+                  setupConnection(conn);
+                  setRoomCode(room);
+                  setMessage("Connecting to Room...");
+              }
+          });
+
+          peer.on('connection', (conn: any) => {
+              console.log('Incoming connection');
+              setupConnection(conn);
+              // Host sends current state to new joiner
+              setTimeout(() => {
+                 conn.send({
+                     type: 'SYNC_STATE',
+                     state: {
+                         tokens, turn, diceValue, canMove, winner
+                     }
+                 });
+              }, 500);
+          });
+
+          peer.on('error', (err: any) => {
+              console.error('Peer Error:', err);
+              setMessage("Connection Error. Try refreshing.");
+          });
+      };
+
+      initPeer();
+
+      return () => {
+          if(peerRef.current) peerRef.current.destroy();
+      }
+      // eslint-disable-next-line
+  }, []); // Run once on mount
+
+  const setupConnection = (conn: any) => {
+      conn.on('open', () => {
+          console.log('Connected to:', conn.peer);
+          connRef.current.push(conn);
+          setIsConnected(true);
+          setMessage("Connected to Game!");
+      });
+
+      conn.on('data', (data: GameAction) => {
+          handleIncomingAction(data);
+      });
+
+      conn.on('close', () => {
+          setMessage("Peer Disconnected");
+          connRef.current = connRef.current.filter(c => c !== conn);
+      });
+  };
+
+  const broadcast = (action: GameAction) => {
+      connRef.current.forEach(conn => {
+          if (conn.open) conn.send(action);
+      });
+  };
+
+  const handleIncomingAction = (action: GameAction) => {
+      console.log('Received Action:', action);
+      
+      switch (action.type) {
+          case 'ROLL_DICE':
+              // Simulate roll on this client
+              setDiceValue(action.value);
+              // Logic to check moves (duplicated from onDiceLanded)
+              const playerTokens = tokens[turn]; // 'turn' might be stale if logic isn't perfect, but simplified for now
+              const hasValidMove = playerTokens.some(t => {
+                  if (t.position === -1) return action.value === 6; 
+                  if (t.position === 99) return false; 
+                  return t.position + action.value <= 56;
+              });
+
+              if (hasValidMove) {
+                  setCanMove(true);
+                  setMessage(`Move ${turn}!`);
+              } else {
+                  setMessage("No moves available.");
+                  setTimeout(nextTurn, 1000); // This relies on synced nextTurn
+              }
+              break;
+
+          case 'MOVE_TOKEN':
+               // Execute move
+               const pTokens = [...tokens[action.color]];
+               const tIndex = pTokens.findIndex(t => t.id === action.tokenId);
+               if (tIndex !== -1) {
+                   const token = pTokens[tIndex];
+                   
+                   // Calculate new pos locally to ensure sync
+                   let newVal = 0; // diceValue might be null if event order is weird, but we trust state
+                   // However, for robust sync, we need the logic.
+                   // Ideally, we run the exact same logic.
+                   
+                   playTokenSound();
+                   
+                   // We need to run the full move logic here to update state
+                   // BUT, since we need `diceValue` which might be null locally if we didn't roll it?
+                   // No, we setDiceValue in 'ROLL_DICE'.
+                   
+                   // Simplified: Trigger the move logic directly
+                   executeMoveLogic(token, action.color);
+               }
+               break;
+
+          case 'SYNC_STATE':
+              setTokens(action.state.tokens);
+              setTurn(action.state.turn);
+              setDiceValue(action.state.diceValue);
+              setCanMove(action.state.canMove);
+              setWinner(action.state.winner);
+              break;
+      }
+  };
 
   const playTokenSound = () => {
       if (tokenAudioRef.current) {
@@ -115,13 +261,13 @@ export const LudoBoard: React.FC = () => {
   };
 
   const handleInviteClick = () => {
-      // Generate a room code if one doesn't exist
-      const code = roomCode || Math.random().toString(36).substring(2, 8).toUpperCase();
-      const url = `${window.location.origin}${window.location.pathname}?room=${code}`;
-      setRoomCode(code);
-      setInviteUrl(url);
-      setShowInvite(true);
-      setIsCopied(false);
+      // Use existing room code if host
+      if (roomCode) {
+          const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+          setInviteUrl(url);
+          setShowInvite(true);
+          setIsCopied(false);
+      }
   };
 
   const handleCopyLink = () => {
@@ -131,18 +277,22 @@ export const LudoBoard: React.FC = () => {
   };
 
   const nextTurn = useCallback(() => {
+    let nextIndex = 0;
     if (diceValue !== 6) {
         const currentIndex = turnOrder.indexOf(turn);
-        const nextIndex = (currentIndex + 1) % 4;
+        nextIndex = (currentIndex + 1) % 4;
         setTurn(turnOrder[nextIndex]);
     }
     setDiceValue(null);
     setCanMove(false);
-    setMessage(`Player ${turnOrder[(turnOrder.indexOf(turn) + (diceValue !== 6 ? 1 : 0)) % 4]}'s turn`);
+    setMessage(`Player ${turnOrder[diceValue !== 6 ? nextIndex : turnOrder.indexOf(turn)]}'s turn`);
   }, [turn, diceValue]);
 
-  // Callback when dice finishes rolling
+  // Callback when dice finishes rolling (Initiated by Local User)
   const onDiceLanded = (value: number) => {
+      // Broadcast Roll
+      broadcast({ type: 'ROLL_DICE', value });
+
       setDiceValue(value);
       setRolling(false);
       
@@ -162,84 +312,95 @@ export const LudoBoard: React.FC = () => {
       }
   };
 
-  const handleTokenClick = (clickedToken: Token) => {
-    if (!canMove || !diceValue || winner) return;
-    if (clickedToken.color !== turn) return;
+  // Logic separate from click handler for reuse
+  const executeMoveLogic = (token: Token, playerColor: PlayerColor) => {
+      const playerTokens = [...tokens[playerColor]];
+      const tokenIndex = playerTokens.findIndex(t => t.id === token.id);
+      
+      // We need the current dice value. If it was remote, it's in state.
+      // If diceValue is null, something is wrong with sync.
+      const moveValue = diceValue || 0; 
+      
+      let moveMade = false;
 
-    const playerTokens = [...tokens[turn]];
-    const tokenIndex = playerTokens.findIndex(t => t.id === clickedToken.id);
-    const token = playerTokens[tokenIndex];
-
-    let moveMade = false;
-
-    if (token.position === -1) {
-      if (diceValue === 6) {
-        token.position = 0; 
-        moveMade = true;
+      if (token.position === -1) {
+        if (moveValue === 6) {
+          token.position = 0; 
+          moveMade = true;
+        }
+      } else if (token.position >= 0 && token.position < 99) {
+        const newPos = token.position + moveValue;
+        if (newPos <= 56) {
+          token.position = newPos === 56 ? 99 : newPos;
+          moveMade = true;
+        }
       }
-    } else if (token.position >= 0 && token.position < 99) {
-      const newPos = token.position + diceValue;
-      if (newPos <= 56) {
-        token.position = newPos === 56 ? 99 : newPos;
-        moveMade = true;
-      }
-    }
 
-    if (moveMade) {
-        playTokenSound();
-        updateGameState(playerTokens, token);
-    }
+      if (moveMade) {
+          // If this was triggered locally, sound is played in click handler.
+          // If triggered remotely, sound is played in handleIncomingAction.
+          
+          const newTokens = { ...tokens, [playerColor]: playerTokens };
+    
+          // Kill Logic
+          let killed = false;
+          if (token.position <= 50 && token.position !== -1 && token.position !== 99) {
+             const offset = PATH_OFFSETS[playerColor];
+             const globalIndex = (token.position + offset) % 52;
+             const coords = GLOBAL_PATH[globalIndex];
+             
+             const isSafe = SAFE_SPOTS.some(s => s.r === coords.r && s.c === coords.c);
+      
+             if (!isSafe) {
+                 Object.keys(newTokens).forEach((colorKey) => {
+                     if (colorKey === playerColor) return;
+                     const opponentColor = colorKey as PlayerColor;
+                     const opponentTokens = newTokens[opponentColor];
+                     const opponentOffset = PATH_OFFSETS[opponentColor];
+      
+                     opponentTokens.forEach(oppToken => {
+                         if (oppToken.position >= 0 && oppToken.position <= 50) {
+                             const oppGlobal = (oppToken.position + opponentOffset) % 52;
+                             const oppCoords = GLOBAL_PATH[oppGlobal];
+                             if (oppCoords.r === coords.r && oppCoords.c === coords.c) {
+                                 oppToken.position = -1; // Kill
+                                 killed = true;
+                                 setMessage(`CUT! ${opponentColor} goes home!`);
+                             }
+                         }
+                     });
+                 });
+             }
+          }
+      
+          setTokens(newTokens);
+          
+          if (playerTokens.every(t => t.position === 99)) {
+              setWinner(playerColor);
+              setMessage(`${playerColor} WINS!`);
+              setCanMove(false);
+          } else {
+              if (moveValue === 6 || killed) {
+                   setDiceValue(null);
+                   setCanMove(false);
+                   setMessage(killed ? "Cut! Roll again!" : "Rolled 6! Roll again.");
+              } else {
+                  nextTurn();
+              }
+          }
+      }
   };
 
-  const updateGameState = (updatedPlayerTokens: Token[], movedToken: Token) => {
-    const newTokens = { ...tokens, [turn]: updatedPlayerTokens };
+  const handleTokenClick = (clickedToken: Token) => {
+    if (!canMove || !diceValue || winner) return;
+    if (clickedToken.color !== turn) return; // Can only move current turn color
+
+    // Broadcast Move BEFORE executing locally to ensure sync? 
+    // Or execute locally and broadcast.
+    broadcast({ type: 'MOVE_TOKEN', color: turn, tokenId: clickedToken.id });
     
-    // Kill Logic
-    let killed = false;
-    if (movedToken.position <= 50 && movedToken.position !== -1 && movedToken.position !== 99) {
-       const offset = PATH_OFFSETS[turn];
-       const globalIndex = (movedToken.position + offset) % 52;
-       const coords = GLOBAL_PATH[globalIndex];
-       
-       const isSafe = SAFE_SPOTS.some(s => s.r === coords.r && s.c === coords.c);
-
-       if (!isSafe) {
-           Object.keys(newTokens).forEach((colorKey) => {
-               if (colorKey === turn) return;
-               const opponentColor = colorKey as PlayerColor;
-               const opponentTokens = newTokens[opponentColor];
-               const opponentOffset = PATH_OFFSETS[opponentColor];
-
-               opponentTokens.forEach(oppToken => {
-                   if (oppToken.position >= 0 && oppToken.position <= 50) {
-                       const oppGlobal = (oppToken.position + opponentOffset) % 52;
-                       const oppCoords = GLOBAL_PATH[oppGlobal];
-                       if (oppCoords.r === coords.r && oppCoords.c === coords.c) {
-                           oppToken.position = -1; // Kill
-                           killed = true;
-                           setMessage(`CUT! ${opponentColor} goes home!`);
-                       }
-                   }
-               });
-           });
-       }
-    }
-
-    setTokens(newTokens);
-    
-    if (updatedPlayerTokens.every(t => t.position === 99)) {
-        setWinner(turn);
-        setMessage(`${turn} WINS!`);
-        setCanMove(false);
-    } else {
-        if (diceValue === 6 || killed) {
-             setDiceValue(null);
-             setCanMove(false);
-             setMessage(killed ? "Cut! Roll again!" : "Rolled 6! Roll again.");
-        } else {
-            nextTurn();
-        }
-    }
+    playTokenSound();
+    executeMoveLogic(clickedToken, turn);
   };
 
   // --- RENDERING HELPERS ---
@@ -388,6 +549,12 @@ export const LudoBoard: React.FC = () => {
       
       {/* PLAYER HUD & INVITE - Top Right */}
       <div className="w-full max-w-[700px] flex justify-end items-center gap-3 mb-2 px-4 sm:px-2 z-40">
+           {isConnected && (
+               <div className="mr-auto flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-bold border border-green-500/20">
+                   <Radio className="w-3 h-3 animate-pulse" />
+                   <span>LIVE</span>
+               </div>
+           )}
            {turnOrder.map((color) => {
                const isTurn = turn === color;
                return (
@@ -473,17 +640,23 @@ export const LudoBoard: React.FC = () => {
 
                  <div className="flex flex-col items-center text-center mb-6">
                      <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/50 rounded-full flex items-center justify-center mb-4">
-                         <Users className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
+                         {isPeerInit && !roomCode ? (
+                             <Loader2 className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin" />
+                         ) : (
+                             <Users className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
+                         )}
                      </div>
                      <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">Invite Friends</h3>
-                     <p className="text-sm text-slate-500 dark:text-slate-400">Share this link to play together!</p>
+                     <p className="text-sm text-slate-500 dark:text-slate-400">
+                         {isConnected ? "You are connected! Play together." : "Share this link to play on another device."}
+                     </p>
                  </div>
 
                  {/* Room Code */}
                  <div className="mb-4">
                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Room Code</label>
                      <div className="text-2xl font-mono font-bold text-slate-800 dark:text-white bg-slate-100 dark:bg-slate-900 py-3 rounded-lg border border-slate-200 dark:border-slate-700 tracking-widest">
-                         {roomCode}
+                         {roomCode || "Generating..."}
                      </div>
                  </div>
 
@@ -519,6 +692,12 @@ export const LudoBoard: React.FC = () => {
                      <Share2 size={18} />
                      <span>Share Link</span>
                  </button>
+                 
+                 {!isConnected && (
+                     <div className="mt-4 text-[10px] text-center text-slate-400">
+                         Wait for "LIVE" badge to appear on top right after friend joins.
+                     </div>
+                 )}
              </div>
         </div>
       )}
