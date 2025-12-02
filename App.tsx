@@ -42,17 +42,17 @@ const App: React.FC = () => {
         
         {/* Logo */}
         <div className="hidden md:flex items-center gap-2 shrink-0 w-32 opacity-90 hover:opacity-100 transition-opacity">
-          <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-1.5 rounded-xl shadow-lg shadow-blue-500/20 ring-1 ring-white/20">
+          <div className="bg-gradient-to-br from-yellow-400 to-amber-600 p-1.5 rounded-xl shadow-lg shadow-amber-500/20 ring-1 ring-white/20">
             <Gamepad2 className="w-5 h-5 text-white" />
           </div>
           <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white drop-shadow-sm">
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-indigo-600">G</span>play
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-500">G</span>play
           </h1>
         </div>
 
         {/* Mobile Logo (Icon Only) */}
         <div className="md:hidden flex items-center shrink-0">
-           <div className="bg-gradient-to-br from-blue-500 to-indigo-600 p-1.5 rounded-xl shadow-lg shadow-blue-500/20 ring-1 ring-white/20">
+           <div className="bg-gradient-to-br from-yellow-400 to-amber-600 p-1.5 rounded-xl shadow-lg shadow-amber-500/20 ring-1 ring-white/20">
             <Gamepad2 className="w-5 h-5 text-white" />
           </div>
         </div>
