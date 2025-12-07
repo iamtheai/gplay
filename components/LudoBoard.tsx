@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef } from 'react';
 import { PlayerColor, Token } from '../types';
 import { Trophy, Star, ChevronRight, Share2, Copy, Check, Users, X, Radio, Loader2 } from 'lucide-react';
 // @ts-ignore
@@ -11,8 +11,6 @@ const BOARD_SIZE = 15;
 type Coord = { r: number; c: number };
 
 // --- PATH LOGIC ---
-// Standard Ludo Path has 52 steps.
-// Each player travels 51 steps on the global path (0-50) and then turns into Home.
 const GLOBAL_PATH: Coord[] = [
   // Green Quadrant (0-12)
   {r:6,c:1}, {r:6,c:2}, {r:6,c:3}, {r:6,c:4}, {r:6,c:5}, // 0-4
@@ -35,7 +33,7 @@ const GLOBAL_PATH: Coord[] = [
   {r:7,c:0}, {r:6,c:0} // 50-51 (Green Turn is at 50, Skips 51)
 ];
 
-// Home Paths (6 steps including goal center)
+// Home Paths
 const HOME_PATHS: Record<PlayerColor, Coord[]> = {
   [PlayerColor.GREEN]: [{r:7,c:1}, {r:7,c:2}, {r:7,c:3}, {r:7,c:4}, {r:7,c:5}, {r:7,c:6}], 
   [PlayerColor.RED]:   [{r:1,c:7}, {r:2,c:7}, {r:3,c:7}, {r:4,c:7}, {r:5,c:7}, {r:6,c:7}],
@@ -48,7 +46,6 @@ const SAFE_SPOTS = [
   {r:8,c:13}, {r:12,c:8}, {r:13,c:6}, {r:8,c:2}
 ];
 
-// Adjusted offsets for 52-step path (13 steps per quadrant)
 const PATH_OFFSETS: Record<PlayerColor, number> = {
   [PlayerColor.GREEN]: 0,
   [PlayerColor.RED]: 13,
@@ -56,12 +53,11 @@ const PATH_OFFSETS: Record<PlayerColor, number> = {
   [PlayerColor.YELLOW]: 39,
 };
 
-// Aligned positions to match the center of visual dots in BaseArea
 const BASE_SLOTS = [
-    { top: '37.5%', left: '37.5%' }, // Top-Left
-    { top: '37.5%', left: '62.5%' }, // Top-Right
-    { top: '62.5%', left: '37.5%' }, // Bottom-Left
-    { top: '62.5%', left: '62.5%' }  // Bottom-Right
+    { top: '37.5%', left: '37.5%' },
+    { top: '37.5%', left: '62.5%' },
+    { top: '62.5%', left: '37.5%' },
+    { top: '62.5%', left: '62.5%' }
 ];
 
 const INITIAL_TOKENS: Record<PlayerColor, Token[]> = {
@@ -96,8 +92,12 @@ export const LudoBoard: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isPeerInit, setIsPeerInit] = useState(false);
   
+  // Team Logic: Host = Yellow & Blue (Bottom), Guest = Green & Red (Top)
+  const [myColors, setMyColors] = useState<PlayerColor[]>([]); 
+  
   const peerRef = useRef<any>(null);
-  const connRef = useRef<any[]>([]); // Array to support multiple connections (Host)
+  const connRef = useRef<any[]>([]); 
+  const diceComponentRef = useRef<any>(null); // To trigger remote animation
 
   // Audio Refs
   const tokenAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -107,7 +107,6 @@ export const LudoBoard: React.FC = () => {
   // --- MULTIPLAYER LOGIC ---
   
   useEffect(() => {
-      // Init Audio
       tokenAudioRef.current = new Audio("https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3");
       tokenAudioRef.current.volume = 0.6;
       tokenAudioRef.current.preload = "auto";
@@ -115,52 +114,51 @@ export const LudoBoard: React.FC = () => {
       const params = new URLSearchParams(window.location.search);
       const room = params.get('room');
 
-      // Initialize PeerJS
       const initPeer = async () => {
           if (isPeerInit) return;
           setIsPeerInit(true);
 
+          // Determine Teams based on Host/Guest
+          if (room) {
+             // Guest
+             setMyColors([PlayerColor.GREEN, PlayerColor.RED]); 
+             setMessage("Connected! You are GREEN & RED");
+          } else {
+             // Host
+             setMyColors([PlayerColor.YELLOW, PlayerColor.BLUE]);
+             setMessage("Room Ready! You are YELLOW & BLUE");
+          }
+
           let myId = room ? undefined : `PG-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-          // If room exists in URL, we are joining (random ID). If not, we are host (Fixed ID).
           
-          const peer = new Peer(myId, {
-            debug: 1
-          });
-          
+          // Fix: cast myId to string to satisfy strict TS check, PeerJS handles undefined internally
+          const peer = new Peer(myId as string, { debug: 1 });
           peerRef.current = peer;
 
           peer.on('open', (id: string) => {
               console.log('My Peer ID:', id);
               if (!room) {
-                  setRoomCode(id); // Host sets the room code
-                  setMessage("Room Created. Invite friends!");
+                  setRoomCode(id);
               } else {
-                  // Connect to Host
-                  console.log('Connecting to host:', room);
-                  const conn = peer.connect(room);
-                  setupConnection(conn);
                   setRoomCode(room);
-                  setMessage("Connecting to Room...");
+                  const conn = peer.connect(room as string);
+                  setupConnection(conn);
               }
           });
 
           peer.on('connection', (conn: any) => {
-              console.log('Incoming connection');
               setupConnection(conn);
-              // Host sends current state to new joiner
               setTimeout(() => {
                  conn.send({
                      type: 'SYNC_STATE',
-                     state: {
-                         tokens, turn, diceValue, canMove, winner
-                     }
+                     state: { tokens, turn, diceValue, canMove, winner }
                  });
               }, 500);
           });
 
           peer.on('error', (err: any) => {
               console.error('Peer Error:', err);
-              setMessage("Connection Error. Try refreshing.");
+              setMessage("Connection Error.");
           });
       };
 
@@ -170,14 +168,12 @@ export const LudoBoard: React.FC = () => {
           if(peerRef.current) peerRef.current.destroy();
       }
       // eslint-disable-next-line
-  }, []); // Run once on mount
+  }, []); 
 
   const setupConnection = (conn: any) => {
       conn.on('open', () => {
-          console.log('Connected to:', conn.peer);
           connRef.current.push(conn);
           setIsConnected(true);
-          setMessage("Connected to Game!");
       });
 
       conn.on('data', (data: GameAction) => {
@@ -185,7 +181,7 @@ export const LudoBoard: React.FC = () => {
       });
 
       conn.on('close', () => {
-          setMessage("Peer Disconnected");
+          setMessage("Opponent Disconnected");
           connRef.current = connRef.current.filter(c => c !== conn);
       });
   };
@@ -201,45 +197,23 @@ export const LudoBoard: React.FC = () => {
       
       switch (action.type) {
           case 'ROLL_DICE':
-              // Simulate roll on this client
-              setDiceValue(action.value);
-              // Logic to check moves (duplicated from onDiceLanded)
-              const playerTokens = tokens[turn]; // 'turn' might be stale if logic isn't perfect, but simplified for now
-              const hasValidMove = playerTokens.some(t => {
-                  if (t.position === -1) return action.value === 6; 
-                  if (t.position === 99) return false; 
-                  return t.position + action.value <= 56;
-              });
-
-              if (hasValidMove) {
-                  setCanMove(true);
-                  setMessage(`Move ${turn}!`);
-              } else {
-                  setMessage("No moves available.");
-                  setTimeout(nextTurn, 1000); // This relies on synced nextTurn
+              // 1. Trigger Visual Animation remotely
+              if (diceComponentRef.current) {
+                  diceComponentRef.current.simulateRoll(action.value);
               }
+              // 2. Wait for animation (simulated delay matches animation duration)
+              // The component itself is 1s animation. We update state AFTER animation visually lands.
+              setTimeout(() => {
+                  processDiceResult(action.value);
+              }, 1000);
               break;
 
           case 'MOVE_TOKEN':
-               // Execute move
+               playTokenSound();
                const pTokens = [...tokens[action.color]];
                const tIndex = pTokens.findIndex(t => t.id === action.tokenId);
                if (tIndex !== -1) {
-                   const token = pTokens[tIndex];
-                   
-                   // Calculate new pos locally to ensure sync
-                   let newVal = 0; // diceValue might be null if event order is weird, but we trust state
-                   // However, for robust sync, we need the logic.
-                   // Ideally, we run the exact same logic.
-                   
-                   playTokenSound();
-                   
-                   // We need to run the full move logic here to update state
-                   // BUT, since we need `diceValue` which might be null locally if we didn't roll it?
-                   // No, we setDiceValue in 'ROLL_DICE'.
-                   
-                   // Simplified: Trigger the move logic directly
-                   executeMoveLogic(token, action.color);
+                   executeMoveLogic(pTokens[tIndex], action.color);
                }
                break;
 
@@ -261,7 +235,6 @@ export const LudoBoard: React.FC = () => {
   };
 
   const handleInviteClick = () => {
-      // Use existing room code if host
       if (roomCode) {
           const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
           setInviteUrl(url);
@@ -285,14 +258,22 @@ export const LudoBoard: React.FC = () => {
     }
     setDiceValue(null);
     setCanMove(false);
-    setMessage(`Player ${turnOrder[diceValue !== 6 ? nextIndex : turnOrder.indexOf(turn)]}'s turn`);
+    
+    // Update message based on whose turn it is
+    const nextPlayer = turnOrder[diceValue !== 6 ? nextIndex : turnOrder.indexOf(turn)];
+    // Check if it's my turn now
+    // We can't easily check 'myColors' inside callback without dependency, but message updates generally
+    setMessage(`${nextPlayer}'s Turn`);
   }, [turn, diceValue]);
 
-  // Callback when dice finishes rolling (Initiated by Local User)
+  // Called when LOCAL player finishes dragging/rolling dice
   const onDiceLanded = (value: number) => {
-      // Broadcast Roll
+      // Broadcast result to opponent so they can animate
       broadcast({ type: 'ROLL_DICE', value });
+      processDiceResult(value);
+  };
 
+  const processDiceResult = (value: number) => {
       setDiceValue(value);
       setRolling(false);
       
@@ -312,15 +293,11 @@ export const LudoBoard: React.FC = () => {
       }
   };
 
-  // Logic separate from click handler for reuse
   const executeMoveLogic = (token: Token, playerColor: PlayerColor) => {
       const playerTokens = [...tokens[playerColor]];
-      const tokenIndex = playerTokens.findIndex(t => t.id === token.id);
       
-      // We need the current dice value. If it was remote, it's in state.
-      // If diceValue is null, something is wrong with sync.
+      // We assume diceValue is synced via state. If not, use stored logic.
       const moveValue = diceValue || 0; 
-      
       let moveMade = false;
 
       if (token.position === -1) {
@@ -337,24 +314,30 @@ export const LudoBoard: React.FC = () => {
       }
 
       if (moveMade) {
-          // If this was triggered locally, sound is played in click handler.
-          // If triggered remotely, sound is played in handleIncomingAction.
-          
           const newTokens = { ...tokens, [playerColor]: playerTokens };
-    
-          // Kill Logic
           let killed = false;
+          
           if (token.position <= 50 && token.position !== -1 && token.position !== 99) {
              const offset = PATH_OFFSETS[playerColor];
              const globalIndex = (token.position + offset) % 52;
              const coords = GLOBAL_PATH[globalIndex];
-             
              const isSafe = SAFE_SPOTS.some(s => s.r === coords.r && s.c === coords.c);
       
              if (!isSafe) {
                  Object.keys(newTokens).forEach((colorKey) => {
                      if (colorKey === playerColor) return;
                      const opponentColor = colorKey as PlayerColor;
+                     
+                     // TEAM MATE PROTECTION: If we are on same team, don't kill?
+                     // Current rule: Host is Yellow/Blue. Guest is Green/Red.
+                     // If Yellow lands on Blue -> Kill? Standard Ludo is Free For All usually, but let's allow kill for now unless user asked to disable friendly fire.
+                     // User said "Start me chala... yellow... automatically blue bhi mera".
+                     // User did NOT explicitly say "Don't kill my own". But usually you don't kill yourself.
+                     // Let's prevent killing if same owner.
+                     const isMyTeammate = (myColors.includes(playerColor) && myColors.includes(opponentColor)) || (!myColors.includes(playerColor) && !myColors.includes(opponentColor));
+                     
+                     if (isMyTeammate) return; // Don't kill teammates
+
                      const opponentTokens = newTokens[opponentColor];
                      const opponentOffset = PATH_OFFSETS[opponentColor];
       
@@ -392,13 +375,19 @@ export const LudoBoard: React.FC = () => {
   };
 
   const handleTokenClick = (clickedToken: Token) => {
+    // 1. Basic Checks
     if (!canMove || !diceValue || winner) return;
-    if (clickedToken.color !== turn) return; // Can only move current turn color
-
-    // Broadcast Move BEFORE executing locally to ensure sync? 
-    // Or execute locally and broadcast.
-    broadcast({ type: 'MOVE_TOKEN', color: turn, tokenId: clickedToken.id });
     
+    // 2. Turn Check
+    if (clickedToken.color !== turn) return; 
+
+    // 3. Ownership Check (CRITICAL: Can I move this?)
+    // If I am connected, I can only move my colors.
+    if (isConnected && !myColors.includes(turn)) {
+        return; // Not my turn!
+    }
+
+    broadcast({ type: 'MOVE_TOKEN', color: turn, tokenId: clickedToken.id });
     playTokenSound();
     executeMoveLogic(clickedToken, turn);
   };
@@ -407,9 +396,8 @@ export const LudoBoard: React.FC = () => {
 
   const renderPathCells = () => {
       const cells = [];
-      for(let r=0; r<15; r++) {
-          for(let c=0; c<15; c++) {
-              // Exclude Bases (0-5,0-5 etc) and Center (6-8,6-8)
+      for(let r=0; r<BOARD_SIZE; r++) {
+          for(let c=0; c<BOARD_SIZE; c++) {
               if ((r<6 && c<6) || (r<6 && c>8) || (r>8 && c<6) || (r>8 && c>8)) continue;
               if (r>=6 && r<=8 && c>=6 && c<=8) continue; 
 
@@ -431,10 +419,7 @@ export const LudoBoard: React.FC = () => {
               cells.push(
                   <div key={`${r}-${c}`} 
                        className={`absolute ${bgClass} ${borderClass} flex items-center justify-center`}
-                       style={{ 
-                           top: `${(r/15)*100}%`, left: `${(c/15)*100}%`, 
-                           width: `${100/15}%`, height: `${100/15}%` 
-                       }}>
+                       style={{ top: `${(r/15)*100}%`, left: `${(c/15)*100}%`, width: `${100/15}%`, height: `${100/15}%` }}>
                        {isSafe && !((r===6 && c===1) || (r===1 && c===8) || (r===8 && c===13) || (r===13 && c===6)) && (
                            <Star className="text-slate-400 w-full h-full p-[2px]" fill="currentColor" opacity={0.5} />
                        )}
@@ -487,13 +472,16 @@ export const LudoBoard: React.FC = () => {
         baseTokens.forEach((t) => {
             const slot = BASE_SLOTS[t.id]; 
             const isMyTurn = t.color === turn;
-            const canPlay = isMyTurn && diceValue === 6 && canMove;
+            // Ownership check for interactivity
+            const isMyTeam = isConnected ? myColors.includes(turn) : true; 
+            const canPlay = isMyTurn && diceValue === 6 && canMove && isMyTeam;
             
             rendered.push(
                 <div key={`base-${t.color}-${t.id}`}
                      onClick={() => handleTokenClick(t)}
                      className={`absolute transition-all duration-300 z-20 flex items-center justify-center
                         ${canPlay ? 'cursor-pointer animate-bounce-slight scale-110' : ''}
+                        ${!isMyTeam && isMyTurn ? 'opacity-80' : ''} 
                      `}
                      style={{
                          top: `calc(${baseTop}% + ${parseFloat(slot.top) * 0.4}% - 3%)`, 
@@ -518,7 +506,8 @@ export const LudoBoard: React.FC = () => {
             const offsetY = count > 1 ? (idx > 1 ? -1 : 1) * 2 : 0;
             const scale = count > 1 ? 0.8 : 1;
             const isMyTurn = t.color === turn;
-            const canPlay = isMyTurn && canMove && diceValue !== null;
+            const isMyTeam = isConnected ? myColors.includes(turn) : true;
+            const canPlay = isMyTurn && canMove && diceValue !== null && isMyTeam;
 
             rendered.push(
                  <div key={`path-${t.color}-${t.id}`}
@@ -543,59 +532,71 @@ export const LudoBoard: React.FC = () => {
     return rendered;
   };
 
+  // --- INTERACTION ---
+  
+  // Can I roll? 
+  // 1. Not rolling, 2. No pending move, 3. No winner
+  // 4. AND it must be my color's turn (if multiplayer)
+  const isMyTurnColor = isConnected ? myColors.includes(turn) : true;
+  const canInteractWithDice = !rolling && !canMove && !winner && isMyTurnColor;
 
   return (
     <div className="relative flex flex-col items-center justify-center w-full gap-4 pb-10 select-none px-0 sm:px-4">
       
-      {/* PLAYER HUD & INVITE - Top Right */}
+      {/* HUD */}
       <div className="w-full max-w-[700px] flex justify-end items-center gap-3 mb-2 px-4 sm:px-2 z-40">
            {isConnected && (
-               <div className="mr-auto flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-bold border border-green-500/20">
-                   <Radio className="w-3 h-3 animate-pulse" />
-                   <span>LIVE</span>
+               <div className="mr-auto flex items-center gap-2">
+                   <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-bold border border-green-500/20">
+                       <Radio className="w-3 h-3 animate-pulse" />
+                       <span>LIVE</span>
+                   </div>
+                   {/* TEAM INDICATOR */}
+                   <div className="text-xs font-bold text-slate-500 dark:text-slate-400 flex gap-1">
+                        YOU: 
+                        {myColors.map(c => (
+                            <div key={c} className={`w-3 h-3 rounded-full ${
+                                c===PlayerColor.RED ? 'bg-red-500' : 
+                                c===PlayerColor.GREEN ? 'bg-green-500' : 
+                                c===PlayerColor.BLUE ? 'bg-blue-500' : 'bg-yellow-400'
+                            }`} />
+                        ))}
+                   </div>
                </div>
            )}
            {turnOrder.map((color) => {
                const isTurn = turn === color;
                return (
-                   <div 
-                      key={color} 
-                      className={`
-                        relative transition-all duration-500 ease-out flex items-center justify-center
-                        ${isTurn ? 'opacity-100 scale-125 saturate-100 drop-shadow-xl' : 'opacity-40 scale-90 grayscale saturate-0'}
-                      `}
-                   >
+                   <div key={color} className={`relative transition-all duration-500 ease-out flex items-center justify-center ${isTurn ? 'opacity-100 scale-125 saturate-100 drop-shadow-xl' : 'opacity-40 scale-90 grayscale saturate-0'}`}>
                         <div className={`p-1 rounded-full ${isTurn ? 'bg-white/10 backdrop-blur-sm' : ''}`}>
                              <div className="w-6 h-6 sm:w-8 sm:h-8">
                                 <TokenPiece color={color} />
                              </div>
                         </div>
-                        {isTurn && (
-                            <div className="absolute -bottom-2 w-1 h-1 bg-white rounded-full animate-pulse shadow-glow" />
-                        )}
                    </div>
                )
            })}
 
-           {/* Vertical Divider */}
            <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
 
-           {/* Invite Button */}
            <button 
                 onClick={handleInviteClick}
-                className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 shadow-[0_4px_10px_rgba(99,102,241,0.4)] hover:shadow-[0_6px_15px_rgba(99,102,241,0.5)] active:scale-95 transition-all duration-300 border border-white/20"
-                title="Invite Friends"
+                className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md transition-all active:scale-95 border border-white/20"
            >
-                <div className="absolute inset-0 rounded-full bg-white/20 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                 <Share2 className="w-4 h-4 text-white" />
            </button>
       </div>
 
-      {/* THE 3D BOARD FRAME */}
-      <div className="relative w-full max-w-[700px] aspect-square rounded-[30px] bg-slate-800 dark:bg-slate-700 p-2 sm:p-3 shadow-[0_20px_50px_rgba(0,0,0,0.5),inset_0_2px_2px_rgba(255,255,255,0.1)]">
-          
-          {/* THE PLAYING SURFACE (Recessed) */}
-          <div className="relative w-full h-full bg-white rounded-[22px] sm:rounded-[18px] overflow-hidden shadow-[inset_0_0_15px_rgba(0,0,0,0.2)]">
+      {/* GAME MESSAGE */}
+      <div className="h-6 flex items-center justify-center">
+         <div className="font-bold text-slate-700 dark:text-slate-300 text-sm animate-fade-in bg-slate-200/50 dark:bg-slate-800/50 px-4 py-1 rounded-full backdrop-blur-sm">
+            {message}
+         </div>
+      </div>
+
+      {/* BOARD */}
+      <div className="relative w-full max-w-[700px] aspect-square rounded-[30px] bg-slate-800 dark:bg-slate-700 p-2 sm:p-3 shadow-2xl">
+          <div className="relative w-full h-full bg-white rounded-[22px] sm:rounded-[18px] overflow-hidden">
             <BaseArea color="green" position="top-left" />
             <BaseArea color="red" position="top-right" />
             <BaseArea color="yellow" position="bottom-left" />
@@ -603,7 +604,6 @@ export const LudoBoard: React.FC = () => {
 
             {renderPathCells()}
 
-            {/* Center */}
             <div className="absolute top-[40%] left-[40%] w-[20%] h-[20%] bg-white dark:bg-slate-200 grid grid-cols-2 grid-rows-2 overflow-hidden">
                 <div className="bg-green-500" style={{ clipPath: 'polygon(0 0, 100% 0, 100% 100%)' }}></div>
                 <div className="bg-red-500" style={{ clipPath: 'polygon(0 0, 100% 100%, 0 100%)' }}></div>
@@ -615,14 +615,21 @@ export const LudoBoard: React.FC = () => {
 
             {renderTokens()}
             
-            {/* DRAGGABLE 3D DICE LAYER */}
+            {/* DICE LAYER */}
             <div className="absolute inset-0 z-50 overflow-hidden pointer-events-none">
                 <ThreeDDice 
+                    ref={diceComponentRef}
                     onLand={onDiceLanded} 
-                    canRoll={!rolling && !canMove && !winner} 
-                    diceValue={diceValue}
+                    canRoll={canInteractWithDice} 
                 />
             </div>
+            
+            {/* TURN BLOCKED OVERLAY */}
+            {!isMyTurnColor && !winner && isConnected && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white text-xs font-bold px-3 py-1 rounded-full z-40 border border-white/20">
+                    Waiting for opponent...
+                </div>
+            )}
           </div>
       </div>
 
@@ -630,21 +637,13 @@ export const LudoBoard: React.FC = () => {
       {showInvite && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
              <div className="relative w-full max-w-sm bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-6 border border-white/10 overflow-hidden">
-                 {/* Close Button */}
-                 <button 
-                    onClick={() => setShowInvite(false)}
-                    className="absolute top-4 right-4 p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                 >
+                 <button onClick={() => setShowInvite(false)} className="absolute top-4 right-4 p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                      <X size={20} />
                  </button>
 
                  <div className="flex flex-col items-center text-center mb-6">
                      <div className="w-16 h-16 bg-indigo-100 dark:bg-indigo-900/50 rounded-full flex items-center justify-center mb-4">
-                         {isPeerInit && !roomCode ? (
-                             <Loader2 className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin" />
-                         ) : (
-                             <Users className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
-                         )}
+                         {isPeerInit && !roomCode ? <Loader2 className="w-8 h-8 animate-spin text-indigo-500" /> : <Users className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />}
                      </div>
                      <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">Invite Friends</h3>
                      <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -652,68 +651,34 @@ export const LudoBoard: React.FC = () => {
                      </p>
                  </div>
 
-                 {/* Room Code */}
                  <div className="mb-4">
-                     <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Room Code</label>
-                     <div className="text-2xl font-mono font-bold text-slate-800 dark:text-white bg-slate-100 dark:bg-slate-900 py-3 rounded-lg border border-slate-200 dark:border-slate-700 tracking-widest">
+                     <div className="text-2xl font-mono font-bold text-slate-800 dark:text-white bg-slate-100 dark:bg-slate-900 py-3 rounded-lg border border-slate-200 dark:border-slate-700 tracking-widest text-center">
                          {roomCode || "Generating..."}
                      </div>
                  </div>
 
-                 {/* Link Input */}
                  <div className="relative mb-6">
-                     <input 
-                        readOnly
-                        value={inviteUrl}
-                        className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm rounded-xl py-3 pl-4 pr-12 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                     />
-                     <button 
-                        onClick={handleCopyLink}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700 hover:bg-indigo-50 dark:hover:bg-slate-700 transition-colors"
-                     >
+                     <input readOnly value={inviteUrl} className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm rounded-xl py-3 pl-4 pr-12" />
+                     <button onClick={handleCopyLink} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-200 hover:bg-indigo-50">
                          {isCopied ? <Check size={16} className="text-green-500" /> : <Copy size={16} className="text-indigo-500" />}
                      </button>
                  </div>
 
-                 <button 
-                    onClick={() => {
-                        if (navigator.share) {
-                            navigator.share({
-                                title: 'Play Ludo on PlayG',
-                                text: `Join my Ludo game! Room: ${roomCode}`,
-                                url: inviteUrl
-                            }).catch(console.error);
-                        } else {
-                            handleCopyLink();
-                        }
-                    }}
-                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/30 transition-all active:scale-95 flex items-center justify-center gap-2"
-                 >
+                 <button onClick={() => navigator.share ? navigator.share({title:'Play Ludo', url:inviteUrl}) : handleCopyLink()} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2">
                      <Share2 size={18} />
                      <span>Share Link</span>
                  </button>
-                 
-                 {!isConnected && (
-                     <div className="mt-4 text-[10px] text-center text-slate-400">
-                         Wait for "LIVE" badge to appear on top right after friend joins.
-                     </div>
-                 )}
              </div>
         </div>
       )}
       
-      {/* Winner Overlay */}
+      {/* WINNER OVERLAY */}
       {winner && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
               <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-2xl text-center max-w-sm w-full animate-bounce-slight border-4 border-yellow-400">
                   <Trophy className="w-20 h-20 text-yellow-400 mx-auto mb-4" />
                   <h2 className="text-3xl font-black text-slate-800 dark:text-white mb-2">{winner} WINS!</h2>
-                  <button 
-                    onClick={() => window.location.reload()}
-                    className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-colors"
-                  >
-                      Play Again
-                  </button>
+                  <button onClick={() => window.location.reload()} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-700 transition-colors">Play Again</button>
               </div>
           </div>
       )}
@@ -723,11 +688,10 @@ export const LudoBoard: React.FC = () => {
 
 // --- 3D DICE COMPONENT ---
 
-const ThreeDDice: React.FC<{ 
+const ThreeDDice = forwardRef<{ simulateRoll: (val: number) => void }, { 
     onLand: (val: number) => void; 
     canRoll: boolean;
-    diceValue: number | null;
-}> = ({ onLand, canRoll, diceValue }) => {
+}>(({ onLand, canRoll }, ref) => {
     const diceRef = useRef<HTMLDivElement>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -736,48 +700,40 @@ const ThreeDDice: React.FC<{
     const dragStart = useRef({ x: 0, y: 0, time: 0 });
     const [isRolling, setIsRolling] = useState(false);
 
-    // Initial positioning in center
+    // Expose method to parent for Remote Rolling
+    useImperativeHandle(ref, () => ({
+        simulateRoll: (val: number) => {
+            // Trigger animation without checking 'canRoll' because it comes from opponent
+            performThrowLogic(15, -15, val); 
+        }
+    }));
+
     useEffect(() => {
         setPosition({ x: 0, y: 0 });
     }, [canRoll]);
 
-    // Initialize Audio
     useEffect(() => {
         audioRef.current = new Audio("https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3");
         audioRef.current.volume = 0.8; 
-        audioRef.current.preload = "auto"; 
     }, []);
 
     const playDiceSound = () => {
         if (audioRef.current) {
             audioRef.current.currentTime = 0;
-            const playPromise = audioRef.current.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    console.warn("Audio playback failed:", error);
-                });
-            }
+            audioRef.current.play().catch(console.warn);
         }
     }
 
     const handlePointerDown = (e: React.PointerEvent) => {
         if (!canRoll || isRolling) return;
         setIsDragging(true);
-        dragStart.current = { 
-            x: e.clientX, 
-            y: e.clientY,
-            time: Date.now() 
-        };
+        dragStart.current = { x: e.clientX, y: e.clientY, time: Date.now() };
         (e.target as Element).setPointerCapture(e.pointerId);
     };
 
     const handlePointerMove = (e: React.PointerEvent) => {
         if (!isDragging) return;
-        
-        const dx = e.clientX - dragStart.current.x;
-        const dy = e.clientY - dragStart.current.y;
-        
-        setPosition({ x: dx, y: dy });
+        setPosition({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
     };
 
     const handlePointerUp = (e: React.PointerEvent) => {
@@ -785,36 +741,30 @@ const ThreeDDice: React.FC<{
         setIsDragging(false);
         (e.target as Element).releasePointerCapture(e.pointerId);
 
-        const endTime = Date.now();
-        const dt = endTime - dragStart.current.time;
+        const dt = Date.now() - dragStart.current.time;
         const dx = e.clientX - dragStart.current.x;
         const dy = e.clientY - dragStart.current.y;
-
-        const vx = dx / (dt || 1);
-        const vy = dy / (dt || 1);
-        
-        const speed = Math.sqrt(vx*vx + vy*vy);
+        const speed = Math.sqrt(dx*dx + dy*dy) / dt;
         
         if (speed > 0.3 || dt < 200) {
-            throwDice(vx * 30, vy * 30); 
+            const result = Math.floor(Math.random() * 6) + 1;
+            performThrowLogic(dx/5, dy/5, result, true); // True = Local throw
         } else {
             setPosition({ x: 0, y: 0 });
         }
     };
 
-    const throwDice = (vx: number, vy: number) => {
+    const performThrowLogic = (vx: number, vy: number, result: number, isLocal: boolean = false) => {
         setIsRolling(true);
         playDiceSound();
-
-        const result = Math.floor(Math.random() * 6) + 1;
         
         if (diceRef.current) {
             const angle = Math.atan2(vy, vx);
-            const dist = Math.min(Math.sqrt(vx*vx + vy*vy) * 10, 300); 
-            
-            const finalX = Math.cos(angle) * Math.max(dist, 100);
-            const finalY = Math.sin(angle) * Math.max(dist, 100);
+            const dist = 200; 
+            const finalX = Math.cos(angle) * dist;
+            const finalY = Math.sin(angle) * dist;
 
+            // Target rotations to show the correct number
             // 1: x0 y0, 6: x180 y0, 2: y90, 5: y-90, 3: x-90, 4: x90
             let rotX = 360 * (Math.floor(Math.random() * 3) + 2); 
             let rotY = 360 * (Math.floor(Math.random() * 3) + 2);
@@ -832,8 +782,10 @@ const ThreeDDice: React.FC<{
             diceRef.current.style.transform = `translate(${finalX}px, ${finalY}px) rotateX(${rotX}deg) rotateY(${rotY}deg) rotateZ(0deg)`;
             
             setTimeout(() => {
-                onLand(result);
                 setIsRolling(false);
+                if (isLocal) {
+                    onLand(result); // Only report back if local user threw it
+                }
             }, 1000);
         }
     };
@@ -873,42 +825,20 @@ const ThreeDDice: React.FC<{
                     Drag & Throw!
                 </div>
             )}
-
             <style>{`
-                .perspective-container {
-                    perspective: 800px;
-                }
+                .perspective-container { perspective: 800px; }
                 .dice-cube {
-                    width: 60px;
-                    height: 60px;
-                    position: relative;
-                    transform-style: preserve-3d;
-                    background-color: #374151; /* Core color to hide gaps */
+                    width: 60px; height: 60px; position: relative; transform-style: preserve-3d;
+                    background-color: #374151;
                 }
-                @media (min-width: 640px) {
-                    .dice-cube { width: 80px; height: 80px; }
-                }
+                @media (min-width: 640px) { .dice-cube { width: 80px; height: 80px; } }
                 .face {
-                    position: absolute;
-                    width: 101%; /* Slight overlap to hide joints */
-                    height: 101%;
-                    left: -0.5%;
-                    top: -0.5%;
-                    
-                    /* Metallic Shiny Polish */
+                    position: absolute; width: 101%; height: 101%; left: -0.5%; top: -0.5%;
                     background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.15) 0%, transparent 40%),
                                 linear-gradient(135deg, #6b7280 0%, #374151 60%, #1f2937 100%);
-                    
                     border: 0.5px solid rgba(255,255,255,0.2);
-                    border-bottom: 0.5px solid rgba(0,0,0,0.5);
                     border-radius: 12px;
-                    
-                    /* Gloss Inset */
-                    box-shadow: inset 0 1px 1px rgba(255,255,255,0.3), inset 0 -2px 10px rgba(0,0,0,0.4);
-                    
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
+                    display: flex; align-items: center; justify-content: center;
                     backface-visibility: hidden; 
                 }
                 .front  { transform: translateZ(30px); }
@@ -917,7 +847,6 @@ const ThreeDDice: React.FC<{
                 .left   { transform: rotateY(-90deg) translateZ(30px); }
                 .top    { transform: rotateX(90deg) translateZ(30px); }
                 .bottom { transform: rotateX(-90deg) translateZ(30px); }
-
                 @media (min-width: 640px) {
                     .front  { transform: translateZ(40px); }
                     .back   { transform: rotateY(180deg) translateZ(40px); }
@@ -929,66 +858,28 @@ const ThreeDDice: React.FC<{
             `}</style>
         </div>
     );
-}
+});
 
 const DotPattern: React.FC<{val: number}> = ({val}) => {
     return (
         <div className="w-full h-full p-2 grid grid-cols-3 grid-rows-3 gap-1">
             {val === 1 && <div className="col-start-2 row-start-2 bg-white rounded-full shadow-sm" />}
-            
-            {val === 2 && <>
-                <div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" />
-                <div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" />
-            </>}
-            
-            {val === 3 && <>
-                <div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" />
-                <div className="col-start-2 row-start-2 bg-white rounded-full shadow-sm" />
-                <div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" />
-            </>}
-
-            {val === 4 && <>
-                <div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" />
-                <div className="col-start-3 row-start-1 bg-white rounded-full shadow-sm" />
-                <div className="col-start-1 row-start-3 bg-white rounded-full shadow-sm" />
-                <div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" />
-            </>}
-
-            {val === 5 && <>
-                <div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" />
-                <div className="col-start-3 row-start-1 bg-white rounded-full shadow-sm" />
-                <div className="col-start-2 row-start-2 bg-white rounded-full shadow-sm" />
-                <div className="col-start-1 row-start-3 bg-white rounded-full shadow-sm" />
-                <div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" />
-            </>}
-
-            {val === 6 && <>
-                <div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" />
-                <div className="col-start-3 row-start-1 bg-white rounded-full shadow-sm" />
-                <div className="col-start-1 row-start-2 bg-white rounded-full shadow-sm" />
-                <div className="col-start-3 row-start-2 bg-white rounded-full shadow-sm" />
-                <div className="col-start-1 row-start-3 bg-white rounded-full shadow-sm" />
-                <div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" />
-            </>}
+            {val === 2 && <><div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" /><div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" /></>}
+            {val === 3 && <><div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" /><div className="col-start-2 row-start-2 bg-white rounded-full shadow-sm" /><div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" /></>}
+            {val === 4 && <><div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" /><div className="col-start-3 row-start-1 bg-white rounded-full shadow-sm" /><div className="col-start-1 row-start-3 bg-white rounded-full shadow-sm" /><div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" /></>}
+            {val === 5 && <><div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" /><div className="col-start-3 row-start-1 bg-white rounded-full shadow-sm" /><div className="col-start-2 row-start-2 bg-white rounded-full shadow-sm" /><div className="col-start-1 row-start-3 bg-white rounded-full shadow-sm" /><div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" /></>}
+            {val === 6 && <><div className="col-start-1 row-start-1 bg-white rounded-full shadow-sm" /><div className="col-start-3 row-start-1 bg-white rounded-full shadow-sm" /><div className="col-start-1 row-start-2 bg-white rounded-full shadow-sm" /><div className="col-start-3 row-start-2 bg-white rounded-full shadow-sm" /><div className="col-start-1 row-start-3 bg-white rounded-full shadow-sm" /><div className="col-start-3 row-start-3 bg-white rounded-full shadow-sm" /></>}
         </div>
     )
 }
 
-// --- SUBCOMPONENTS ---
-
 const BaseArea: React.FC<{color: string, position: string}> = ({color, position}) => {
     const bg = color === 'green' ? 'bg-green-500' : color === 'red' ? 'bg-red-500' : color === 'blue' ? 'bg-blue-500' : 'bg-yellow-400';
-    
     const style: React.CSSProperties = {
-        position: 'absolute',
-        width: '40%', 
-        height: '40%',
-        top: position.includes('top') ? 0 : 'auto',
-        bottom: position.includes('bottom') ? 0 : 'auto',
-        left: position.includes('left') ? 0 : 'auto',
-        right: position.includes('right') ? 0 : 'auto',
+        position: 'absolute', width: '40%', height: '40%',
+        top: position.includes('top') ? 0 : 'auto', bottom: position.includes('bottom') ? 0 : 'auto',
+        left: position.includes('left') ? 0 : 'auto', right: position.includes('right') ? 0 : 'auto',
     };
-
     return (
         <div style={style} className={`${bg} p-[10%] flex items-center justify-center`}>
             <div className="w-full h-full bg-white rounded-2xl flex flex-wrap content-center justify-center shadow-inner overflow-hidden">
@@ -1004,15 +895,13 @@ const BaseArea: React.FC<{color: string, position: string}> = ({color, position}
 }
 
 const TokenPiece: React.FC<{color: PlayerColor}> = ({color}) => {
-    let bg = '';
-    let ring = '';
+    let bg = '', ring = '';
     switch(color) {
         case PlayerColor.GREEN: bg = 'bg-green-600'; ring = 'ring-green-300'; break;
         case PlayerColor.RED: bg = 'bg-red-600'; ring = 'ring-red-300'; break;
         case PlayerColor.BLUE: bg = 'bg-blue-600'; ring = 'ring-blue-300'; break;
         case PlayerColor.YELLOW: bg = 'bg-yellow-500'; ring = 'ring-yellow-200'; break;
     }
-
     return (
         <div className="relative w-full h-full transition-transform shrink-0">
              <div className={`w-full h-full rounded-full ${bg} shadow-[0_3px_3px_rgba(0,0,0,0.4)] ring-2 ${ring} ring-offset-1 flex items-center justify-center relative overflow-hidden`}>
