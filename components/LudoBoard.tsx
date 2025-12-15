@@ -906,7 +906,7 @@ const TokenPiece: React.FC<{color: PlayerColor}> = ({color}) => {
         case PlayerColor.GREEN: bg = 'bg-green-600'; ring = 'ring-green-300'; break;
         case PlayerColor.RED: bg = 'bg-red-600'; ring = 'ring-red-300'; break;
         case PlayerColor.BLUE: bg = 'bg-blue-600'; ring = 'ring-blue-300'; break;
-        case PlayerColor.YELLOW: bg = 'bg-yellow-500'; ring = 'ring-yellow-200'; break;
+        case PlayerColor.YELLOW: bg = 'bg-yellow-500'; ring = 'ring-yellow-201'; break;
     }
     return (
         <div className="relative w-full h-full transition-transform shrink-0">
