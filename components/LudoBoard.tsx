@@ -908,7 +908,7 @@ const TokenPiece: React.FC<{color: PlayerColor}> = ({color}) => {
                   <div className="absolute top-1 left-2 w-2 h-2 bg-white rounded-full opacity-60 blur-[1px]"></div>
                   <div className="absolute inset-0 bg-gradient-to-br from-white/30 to-black/20 pointer-events-none"></div>
              </div>
-             <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-[80%] h-1.6 bg-black/30 blur-sm rounded-full -z-10"></div>
+             <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-[80%] h-1.5 bg-black/30 blur-sm rounded-full -z-10"></div>
         </div>
     )
 }
