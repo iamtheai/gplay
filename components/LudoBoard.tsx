@@ -70,7 +70,7 @@ const INITIAL_TOKENS: Record<PlayerColor, Token[]> = {
 // --- MULTIPLAYER ACTION TYPES ---
 type GameAction = 
   | { type: 'ROLL_DICE'; value: number }
-  | { type: 'MOVE_TOKEN'; color: PlayerColor; tokenId: number }
+  | { type: 'MOVE_TOKEN'; color: PlayerColor; tokenId: number; rolledValue: number }
   | { type: 'SYNC_STATE'; state: any };
 
 // --- MAIN COMPONENT ---
@@ -213,7 +213,8 @@ export const LudoBoard: React.FC = () => {
                const pTokens = [...tokens[action.color]];
                const tIndex = pTokens.findIndex(t => t.id === action.tokenId);
                if (tIndex !== -1) {
-                   executeMoveLogic(pTokens[tIndex], action.color);
+                   // Ensure we use the value the user actually rolled, not what our local state thinks
+                   executeMoveLogic(pTokens[tIndex], action.color, action.rolledValue);
                }
                break;
 
@@ -251,20 +252,25 @@ export const LudoBoard: React.FC = () => {
 
   const nextTurn = useCallback(() => {
     let nextIndex = 0;
-    if (diceValue !== 6) {
-        const currentIndex = turnOrder.indexOf(turn);
-        nextIndex = (currentIndex + 1) % 4;
-        setTurn(turnOrder[nextIndex]);
-    }
+    // Note: We use the *previous* dice value logic here. If it was 6, we don't change turn.
+    // However, executeMoveLogic handles the decision to call nextTurn.
+    // Here we just calculate WHO is next.
+    
+    // Check if we should really switch (if 6, we might not come here unless no moves)
+    const currentIndex = turnOrder.indexOf(turn);
+    nextIndex = (currentIndex + 1) % 4;
+    
+    // But if dice was 6, we stay (handled in executeMoveLogic mostly, but generic nextTurn switches)
+    // If called directly, we switch.
+    setTurn(turnOrder[nextIndex]);
+    
     setDiceValue(null);
     setCanMove(false);
     
     // Update message based on whose turn it is
-    const nextPlayer = turnOrder[diceValue !== 6 ? nextIndex : turnOrder.indexOf(turn)];
-    // Check if it's my turn now
-    // We can't easily check 'myColors' inside callback without dependency, but message updates generally
+    const nextPlayer = turnOrder[nextIndex];
     setMessage(`${nextPlayer}'s Turn`);
-  }, [turn, diceValue]);
+  }, [turn]);
 
   // Called when LOCAL player finishes dragging/rolling dice
   const onDiceLanded = (value: number) => {
@@ -293,11 +299,11 @@ export const LudoBoard: React.FC = () => {
       }
   };
 
-  const executeMoveLogic = (token: Token, playerColor: PlayerColor) => {
+  const executeMoveLogic = (token: Token, playerColor: PlayerColor, explicitDiceValue?: number) => {
       const playerTokens = [...tokens[playerColor]];
       
-      // We assume diceValue is synced via state. If not, use stored logic.
-      const moveValue = diceValue || 0; 
+      // Use explicit value if provided (network), otherwise local state
+      const moveValue = explicitDiceValue ?? diceValue ?? 0; 
       let moveMade = false;
 
       if (token.position === -1) {
@@ -328,12 +334,7 @@ export const LudoBoard: React.FC = () => {
                      if (colorKey === playerColor) return;
                      const opponentColor = colorKey as PlayerColor;
                      
-                     // TEAM MATE PROTECTION: If we are on same team, don't kill?
-                     // Current rule: Host is Yellow/Blue. Guest is Green/Red.
-                     // If Yellow lands on Blue -> Kill? Standard Ludo is Free For All usually, but let's allow kill for now unless user asked to disable friendly fire.
-                     // User said "Start me chala... yellow... automatically blue bhi mera".
-                     // User did NOT explicitly say "Don't kill my own". But usually you don't kill yourself.
-                     // Let's prevent killing if same owner.
+                     // TEAM MATE PROTECTION
                      const isMyTeammate = (myColors.includes(playerColor) && myColors.includes(opponentColor)) || (!myColors.includes(playerColor) && !myColors.includes(opponentColor));
                      
                      if (isMyTeammate) return; // Don't kill teammates
@@ -382,14 +383,19 @@ export const LudoBoard: React.FC = () => {
     if (clickedToken.color !== turn) return; 
 
     // 3. Ownership Check (CRITICAL: Can I move this?)
-    // If I am connected, I can only move my colors.
     if (isConnected && !myColors.includes(turn)) {
-        return; // Not my turn!
+        return; 
     }
 
-    broadcast({ type: 'MOVE_TOKEN', color: turn, tokenId: clickedToken.id });
+    // Broadcast the exact roll used for this move to avoid synchronization timing issues
+    broadcast({ 
+        type: 'MOVE_TOKEN', 
+        color: turn, 
+        tokenId: clickedToken.id,
+        rolledValue: diceValue 
+    });
     playTokenSound();
-    executeMoveLogic(clickedToken, turn);
+    executeMoveLogic(clickedToken, turn, diceValue);
   };
 
   // --- RENDERING HELPERS ---
