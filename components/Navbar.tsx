@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { GameType } from '../types';
-import { Dices, Hash, Crown, Worm, Trophy, Activity, Disc } from 'lucide-react';
+import { Dices, Hash, Crown, Zap, Trophy, Activity, Disc } from 'lucide-react';
 
 interface NavbarProps {
   activeGame: GameType;
@@ -11,8 +11,8 @@ const GAME_ICONS: Record<GameType, React.ReactNode> = {
   [GameType.LUDO]: <Dices size={16} />,
   [GameType.TIC_TAC_TOE]: <Hash size={16} />,
   [GameType.CHESS]: <Crown size={16} />,
-  [GameType.SNAKE]: <Worm size={16} />,
-  [GameType.CRICKET]: <Trophy size={16} />,
+  [GameType.SNAKE]: <Zap size={16} />,
+    [GameType.CRICKET]: <Trophy size={16} />,
   [GameType.TABLE_TENNIS]: <Activity size={16} />,
   [GameType.BADMINTON]: <Disc size={16} />,
 };
