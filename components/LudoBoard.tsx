@@ -54,7 +54,7 @@ const PATH_OFFSETS: Record<PlayerColor, number> = {
 };
 
 const BASE_SLOTS = [
-    { top: '37.5%', left: '37.5%' },
+    { top: '37.5%', left: '37.4%' },
     { top: '37.5%', left: '62.5%' },
     { top: '62.5%', left: '37.5%' },
     { top: '62.5%', left: '62.5%' }
