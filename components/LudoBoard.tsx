@@ -666,7 +666,7 @@ export const LudoBoard: React.FC = () => {
                  <div className="relative mb-6">
                      <input readOnly value={inviteUrl} className="w-full bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-sm rounded-xl py-3 pl-4 pr-12" />
                      <button onClick={handleCopyLink} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-slate-200 hover:bg-indigo-50">
-                         {isCopied ? <Check size={16} className="text-green-500" /> : <Copy size={16} className="text-indigo-500" />}
+                         {isCopied ? <Check size={16} className="text-green-500" /> : <Copy size={15} className="text-indigo-500" />}
                      </button>
                  </div>
 
