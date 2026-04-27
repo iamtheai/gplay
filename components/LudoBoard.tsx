@@ -823,8 +823,7 @@ const ThreeDDice = forwardRef<{ simulateRoll: (val: number) => void }, {
     // Expose method to parent for Remote Rolling
     useImperativeHandle(ref, () => ({
         simulateRoll: (val: number) => {
-            // Trigger animation without checking 'canRoll' because it comes from opponent
-            performThrowLogic(15, -15, val); 
+            performThrowLogic(10, -10, val); 
         }
     }));
 
@@ -868,7 +867,7 @@ const ThreeDDice = forwardRef<{ simulateRoll: (val: number) => void }, {
         
         if (speed > 0.3 || dt < 200) {
             const result = Math.floor(Math.random() * 6) + 1;
-            performThrowLogic(dx/5, dy/5, result, true); // True = Local throw
+            performThrowLogic(dx/5, dy/5, result, true);
         } else {
             setPosition({ x: 0, y: 0 });
         }
@@ -880,12 +879,11 @@ const ThreeDDice = forwardRef<{ simulateRoll: (val: number) => void }, {
         
         if (diceRef.current) {
             const angle = Math.atan2(vy, vx);
-            const dist = 200; 
+            // Small throw distance — stays within the base area
+            const dist = 40; 
             const finalX = Math.cos(angle) * dist;
             const finalY = Math.sin(angle) * dist;
 
-            // Target rotations to show the correct number
-            // 1: x0 y0, 6: x180 y0, 2: y90, 5: y-90, 3: x-90, 4: x90
             let rotX = 360 * (Math.floor(Math.random() * 3) + 2); 
             let rotY = 360 * (Math.floor(Math.random() * 3) + 2);
             
@@ -898,31 +896,44 @@ const ThreeDDice = forwardRef<{ simulateRoll: (val: number) => void }, {
                 case 4: rotX += 90; rotY += 0; break;
             }
             
-            diceRef.current.style.transition = 'transform 1s cubic-bezier(0.25, 1, 0.5, 1)';
-            diceRef.current.style.transform = `translate(${finalX}px, ${finalY}px) rotateX(${rotX}deg) rotateY(${rotY}deg) rotateZ(0deg)`;
+            // Phase 1: Throw outward with spin
+            diceRef.current.style.transition = 'transform 0.6s cubic-bezier(0.25, 1, 0.5, 1)';
+            diceRef.current.style.transform = `translate(${finalX}px, ${finalY}px) rotateX(${rotX}deg) rotateY(${rotY}deg)`;
             
+            // Phase 2: Snap back to center showing the result face
+            setTimeout(() => {
+                if (diceRef.current) {
+                    // Keep the final rotation (shows result) but move back to 0,0
+                    const finalRotX = rotX % 360;
+                    const finalRotY = rotY % 360;
+                    diceRef.current.style.transition = 'transform 0.4s ease-out';
+                    diceRef.current.style.transform = `translate(0px, 0px) rotateX(${finalRotX}deg) rotateY(${finalRotY}deg)`;
+                }
+            }, 650);
+
             setTimeout(() => {
                 setIsRolling(false);
                 if (isLocal) {
-                    onLand(result); // Only report back if local user threw it
+                    onLand(result);
                 }
-            }, 1000);
+            }, 1100);
         }
     };
 
+    // Reset dice to idle rotation when turn changes or canRoll changes
     useEffect(() => {
-        if (canRoll && diceRef.current) {
+        if (diceRef.current) {
              diceRef.current.style.transition = 'transform 0.5s ease-out';
              diceRef.current.style.transform = `translate(0px, 0px) rotateX(25deg) rotateY(45deg)`;
         }
-    }, [canRoll]);
+    }, [canRoll, turn]);
 
     const getPositionClass = () => {
         switch(turn) {
             case PlayerColor.GREEN: return 'top-[20%] left-[20%]';
-            case PlayerColor.RED: return 'top-[20%] left-[80%]';
-            case PlayerColor.YELLOW: return 'top-[80%] left-[20%]';
-            case PlayerColor.BLUE: return 'top-[80%] left-[80%]';
+            case PlayerColor.RED: return 'top-[20%] right-[20%]';
+            case PlayerColor.YELLOW: return 'bottom-[20%] left-[20%]';
+            case PlayerColor.BLUE: return 'bottom-[20%] right-[20%]';
             default: return 'top-1/2 left-1/2';
         }
     };
@@ -935,7 +946,7 @@ const ThreeDDice = forwardRef<{ simulateRoll: (val: number) => void }, {
                     onPointerDown={handlePointerDown}
                     onPointerMove={handlePointerMove}
                     onPointerUp={handlePointerUp}
-                    className={`dice-cube cursor-grab active:cursor-grabbing ${!canRoll ? 'opacity-50 grayscale' : ''}`}
+                    className={`dice-cube cursor-grab active:cursor-grabbing transition-opacity duration-300 ${!canRoll ? 'opacity-40 grayscale' : 'opacity-100'}`}
                     style={{
                         transform: isDragging 
                             ? `translate(${position.x}px, ${position.y}px) rotateX(25deg) rotateY(45deg) scale(1.1)` 
