@@ -664,13 +664,15 @@ export const LudoBoard: React.FC = () => {
 
            <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
 
-           <button 
-                onClick={quitGame}
-                className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 shadow-md transition-all active:scale-95 border border-white/20 mr-1"
-                title="Quit Game"
-           >
-                <X className="w-5 h-5 text-white" />
-           </button>
+           {isConnected && (
+               <button 
+                    onClick={quitGame}
+                    className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 shadow-md transition-all active:scale-95 border border-white/20 mr-1"
+                    title="Quit Game"
+               >
+                    <X className="w-5 h-5 text-white" />
+               </button>
+           )}
 
            <button 
                 onClick={handleInviteClick}
