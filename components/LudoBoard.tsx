@@ -71,29 +71,38 @@ const INITIAL_TOKENS: Record<PlayerColor, Token[]> = {
 type GameAction = 
   | { type: 'ROLL_DICE'; value: number }
   | { type: 'MOVE_TOKEN'; color: PlayerColor; tokenId: number; rolledValue: number }
-  | { type: 'SYNC_STATE'; state: any };
+  | { type: 'SYNC_STATE'; state: any }
+  | { type: 'QUIT_GAME' };
 
 // --- MAIN COMPONENT ---
 
+const loadState = <T,>(key: string, defaultVal: T): T => {
+    try {
+        const saved = localStorage.getItem(`ludo_${key}`);
+        if (saved) return JSON.parse(saved);
+    } catch(e){}
+    return defaultVal;
+};
+
 export const LudoBoard: React.FC = () => {
-  const [tokens, setTokens] = useState<Record<PlayerColor, Token[]>>(INITIAL_TOKENS);
-  const [turn, setTurn] = useState<PlayerColor>(PlayerColor.GREEN);
-  const [diceValue, setDiceValue] = useState<number | null>(null);
+  const [tokens, setTokens] = useState<Record<PlayerColor, Token[]>>(() => loadState('tokens', INITIAL_TOKENS));
+  const [turn, setTurn] = useState<PlayerColor>(() => loadState('turn', PlayerColor.GREEN));
+  const [diceValue, setDiceValue] = useState<number | null>(() => loadState('diceValue', null));
   const [rolling, setRolling] = useState(false);
-  const [canMove, setCanMove] = useState(false);
-  const [message, setMessage] = useState("Drag Dice to Start!");
-  const [winner, setWinner] = useState<PlayerColor | null>(null);
+  const [canMove, setCanMove] = useState(() => loadState('canMove', false));
+  const [message, setMessage] = useState(() => loadState('message', "Drag Dice to Start!"));
+  const [winner, setWinner] = useState<PlayerColor | null>(() => loadState('winner', null));
 
   // Multiplayer State
   const [showInvite, setShowInvite] = useState(false);
-  const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [roomCode, setRoomCode] = useState<string | null>(() => loadState('roomCode', null));
   const [inviteUrl, setInviteUrl] = useState('');
   const [isCopied, setIsCopied] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isPeerInit, setIsPeerInit] = useState(false);
   
   // Team Logic: Host = Yellow & Blue (Bottom), Guest = Green & Red (Top)
-  const [myColors, setMyColors] = useState<PlayerColor[]>([]); 
+  const [myColors, setMyColors] = useState<PlayerColor[]>(() => loadState('myColors', [])); 
   
   const peerRef = useRef<any>(null);
   const connRef = useRef<any[]>([]); 
@@ -109,6 +118,18 @@ export const LudoBoard: React.FC = () => {
 
   const turnOrder = [PlayerColor.GREEN, PlayerColor.RED, PlayerColor.BLUE, PlayerColor.YELLOW];
 
+  // --- PERSISTENCE ---
+  useEffect(() => {
+      localStorage.setItem('ludo_tokens', JSON.stringify(tokens));
+      localStorage.setItem('ludo_turn', JSON.stringify(turn));
+      localStorage.setItem('ludo_diceValue', JSON.stringify(diceValue));
+      localStorage.setItem('ludo_canMove', JSON.stringify(canMove));
+      localStorage.setItem('ludo_winner', JSON.stringify(winner));
+      localStorage.setItem('ludo_roomCode', JSON.stringify(roomCode));
+      localStorage.setItem('ludo_myColors', JSON.stringify(myColors));
+      localStorage.setItem('ludo_message', JSON.stringify(message));
+  }, [tokens, turn, diceValue, canMove, winner, roomCode, myColors, message]);
+
   // --- MULTIPLAYER LOGIC ---
   
   useEffect(() => {
@@ -117,42 +138,46 @@ export const LudoBoard: React.FC = () => {
       tokenAudioRef.current.preload = "auto";
 
       const params = new URLSearchParams(window.location.search);
-      const room = params.get('room');
-
+      const urlRoom = params.get('room');
+      
       const initPeer = async () => {
           if (isPeerInit) return;
           setIsPeerInit(true);
 
-          // Determine Teams based on Host/Guest
-          if (room) {
-             // Guest
+          let isGuest = !!urlRoom;
+          
+          if (isGuest) {
              setMyColors([PlayerColor.GREEN, PlayerColor.RED]); 
-             setMessage("Connected! You are GREEN & RED");
+             setMessage("Connecting to Host...");
           } else {
-             // Host
-             setMyColors([PlayerColor.YELLOW, PlayerColor.BLUE]);
-             setMessage("Room Ready! You are YELLOW & BLUE");
+             if (myColors.length === 0) setMyColors([PlayerColor.YELLOW, PlayerColor.BLUE]);
+             if (message === "Drag Dice to Start!") setMessage("Room Ready! You are YELLOW & BLUE");
           }
 
-          let myId = room ? undefined : `PG-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+          let savedPeerId = localStorage.getItem('ludo_myPeerId');
+          // If guest, we don't strictly need a fixed ID, but host needs it to recover their room
+          let myId = isGuest ? undefined : (savedPeerId ? savedPeerId : `PG-${Math.random().toString(36).substring(2, 8).toUpperCase()}`);
           
-          // Fix: cast myId to string to satisfy strict TS check, PeerJS handles undefined internally
+          if (!isGuest && myId) {
+             localStorage.setItem('ludo_myPeerId', myId);
+          }
+          
           const peer = new Peer(myId as string, { debug: 1 });
           peerRef.current = peer;
 
           peer.on('open', (id: string) => {
               console.log('My Peer ID:', id);
-              if (!room) {
+              if (!isGuest) {
                   setRoomCode(id);
               } else {
-                  setRoomCode(room);
-                  const conn = peer.connect(room as string);
-                  setupConnection(conn);
+                  setRoomCode(urlRoom);
+                  const conn = peer.connect(urlRoom as string);
+                  setupConnection(conn, true);
               }
           });
 
           peer.on('connection', (conn: any) => {
-              setupConnection(conn);
+              setupConnection(conn, false);
               setTimeout(() => {
                  const s = stateRef.current;
                  conn.send({
@@ -164,7 +189,18 @@ export const LudoBoard: React.FC = () => {
 
           peer.on('error', (err: any) => {
               console.error('Peer Error:', err);
-              setMessage("Connection Error.");
+              // If we are guest and failed to connect, try again
+              if (isGuest && err.type === 'peer-unavailable') {
+                  setMessage("Reconnecting...");
+                  setTimeout(() => {
+                      if (peerRef.current && !peerRef.current.destroyed) {
+                          const conn = peerRef.current.connect(urlRoom as string);
+                          setupConnection(conn, true);
+                      }
+                  }, 3000);
+              } else {
+                  setMessage("Connection Error.");
+              }
           });
       };
 
@@ -176,10 +212,11 @@ export const LudoBoard: React.FC = () => {
       // eslint-disable-next-line
   }, []); 
 
-  const setupConnection = (conn: any) => {
+  const setupConnection = (conn: any, isGuest: boolean) => {
       conn.on('open', () => {
           connRef.current.push(conn);
           setIsConnected(true);
+          setMessage("Connected! LIVE");
       });
 
       conn.on('data', (data: GameAction) => {
@@ -187,8 +224,22 @@ export const LudoBoard: React.FC = () => {
       });
 
       conn.on('close', () => {
-          setMessage("Opponent Disconnected");
+          setIsConnected(false);
           connRef.current = connRef.current.filter(c => c !== conn);
+          
+          if (isGuest) {
+              setMessage("Reconnecting...");
+              // Guest tries to reconnect continuously
+              const attemptReconnect = () => {
+                  if (peerRef.current && !peerRef.current.destroyed && !isConnected) {
+                      const newConn = peerRef.current.connect(conn.peer);
+                      setupConnection(newConn, true);
+                  }
+              };
+              setTimeout(attemptReconnect, 3000);
+          } else {
+              setMessage("Opponent disconnected. Waiting...");
+          }
       });
   };
 
@@ -203,12 +254,9 @@ export const LudoBoard: React.FC = () => {
       
       switch (action.type) {
           case 'ROLL_DICE':
-              // 1. Trigger Visual Animation remotely
               if (diceComponentRef.current) {
                   diceComponentRef.current.simulateRoll(action.value);
               }
-              // 2. Wait for animation, then process result using a synthetic action
-              // to ensure we use the latest state (avoid stale closure in setTimeout)
               setTimeout(() => {
                   processDiceResult(action.value);
               }, 1000);
@@ -219,7 +267,6 @@ export const LudoBoard: React.FC = () => {
                const pTokens = [...tokens[action.color]];
                const tIndex = pTokens.findIndex(t => t.id === action.tokenId);
                if (tIndex !== -1) {
-                   // Ensure we use the value the user actually rolled, not what our local state thinks
                    executeMoveLogic(pTokens[tIndex], action.color, action.rolledValue);
                }
                break;
@@ -231,10 +278,34 @@ export const LudoBoard: React.FC = () => {
               setCanMove(action.state.canMove);
               setWinner(action.state.winner);
               break;
+              
+          case 'QUIT_GAME':
+              clearGameState();
+              break;
       }
   };
   // Keep ref updated every render so PeerJS callback always calls latest version
   handleIncomingActionRef.current = handleIncomingAction;
+
+  const clearGameState = () => {
+      localStorage.removeItem('ludo_tokens');
+      localStorage.removeItem('ludo_turn');
+      localStorage.removeItem('ludo_diceValue');
+      localStorage.removeItem('ludo_canMove');
+      localStorage.removeItem('ludo_winner');
+      localStorage.removeItem('ludo_roomCode');
+      localStorage.removeItem('ludo_myColors');
+      localStorage.removeItem('ludo_message');
+      localStorage.removeItem('ludo_myPeerId');
+      window.location.href = window.location.origin + window.location.pathname; // Remove query params and reload
+  };
+
+  const quitGame = () => {
+      if (window.confirm("Are you sure you want to end the game for both players?")) {
+          broadcast({ type: 'QUIT_GAME' });
+          clearGameState();
+      }
+  };
 
   const playTokenSound = () => {
       if (tokenAudioRef.current) {
@@ -594,8 +665,17 @@ export const LudoBoard: React.FC = () => {
            <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
 
            <button 
+                onClick={quitGame}
+                className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 shadow-md transition-all active:scale-95 border border-white/20 mr-1"
+                title="Quit Game"
+           >
+                <X className="w-5 h-5 text-white" />
+           </button>
+
+           <button 
                 onClick={handleInviteClick}
                 className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md transition-all active:scale-95 border border-white/20"
+                title="Share Game"
            >
                 <Share2 className="w-4 h-4 text-white" />
            </button>
