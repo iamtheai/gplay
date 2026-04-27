@@ -36,49 +36,40 @@ const App: React.FC = () => {
         - High blur, medium opacity for "frosted material" look
         - Content bleeds through
       */}
-      <header className="fixed top-0 left-0 right-0 z-50 px-4 py-2 flex items-center justify-between gap-4 
-                         bg-white/50 dark:bg-[#121212]/50 backdrop-blur-3xl backdrop-saturate-150
-                         shadow-[0_4px_30px_rgba(0,0,0,0.03)] border-b-0">
+      {/* Vertical Right-Side Header */}
+      <header className="fixed top-1/2 -translate-y-1/2 right-2 sm:right-4 z-50 flex flex-col items-center gap-3
+                         bg-white/60 dark:bg-[#121212]/60 backdrop-blur-3xl backdrop-saturate-150
+                         shadow-2xl rounded-full py-3 px-1.5 sm:px-2 border border-white/15 dark:border-white/5">
         
         {/* Logo */}
-        <div className="hidden md:flex items-center gap-2 shrink-0 w-32 opacity-90 hover:opacity-100 transition-opacity">
+        <div className="flex items-center justify-center shrink-0 opacity-90 hover:opacity-100 transition-opacity">
           <div className="bg-gradient-to-br from-yellow-400 to-amber-600 p-1.5 rounded-xl shadow-lg shadow-amber-500/20 ring-1 ring-white/20">
-            <Gamepad2 className="w-5 h-5 text-white" />
-          </div>
-          <h1 className="text-xl font-black tracking-tight text-slate-900 dark:text-white drop-shadow-sm">
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-500">G</span>play
-          </h1>
-        </div>
-
-        {/* Mobile Logo (Icon Only) */}
-        <div className="md:hidden flex items-center shrink-0">
-           <div className="bg-gradient-to-br from-yellow-400 to-amber-600 p-1.5 rounded-xl shadow-lg shadow-amber-500/20 ring-1 ring-white/20">
-            <Gamepad2 className="w-5 h-5 text-white" />
+            <Gamepad2 className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </div>
         </div>
 
-        {/* Scrollable Navigation Tabs - Centered */}
-        <div className="flex-1 overflow-hidden flex justify-center">
-           <Navbar activeGame={activeGame} onSelectGame={setActiveGame} />
-        </div>
+        <div className="w-6 h-px bg-slate-300 dark:bg-slate-600"></div>
+
+        {/* Vertical Game Tabs */}
+        <Navbar activeGame={activeGame} onSelectGame={setActiveGame} />
+
+        <div className="w-6 h-px bg-slate-300 dark:bg-slate-600"></div>
 
         {/* Theme Toggle */}
-        <div className="shrink-0 w-10 flex justify-end">
-          <button
-            onClick={toggleTheme}
-            className="group relative p-2.5 rounded-full overflow-hidden transition-all duration-300 hover:scale-105 active:scale-95"
-            aria-label="Toggle Theme"
-          >
-            <div className="absolute inset-0 bg-black/5 dark:bg-white/10 backdrop-blur-md transition-colors rounded-full"></div>
-            <div className="relative z-10 text-slate-600 dark:text-yellow-400 transition-transform duration-500 rotate-0 dark:rotate-180">
-                {darkMode ? <Sun size={20} fill="currentColor" className="opacity-90" /> : <Moon size={20} fill="currentColor" className="opacity-80" />}
-            </div>
-          </button>
-        </div>
+        <button
+          onClick={toggleTheme}
+          className="group relative p-2 rounded-full overflow-hidden transition-all duration-300 hover:scale-105 active:scale-95"
+          aria-label="Toggle Theme"
+        >
+          <div className="absolute inset-0 bg-black/5 dark:bg-white/10 backdrop-blur-md transition-colors rounded-full"></div>
+          <div className="relative z-10 text-slate-600 dark:text-yellow-400 transition-transform duration-500 rotate-0 dark:rotate-180">
+              {darkMode ? <Sun size={18} fill="currentColor" className="opacity-90" /> : <Moon size={18} fill="currentColor" className="opacity-80" />}
+          </div>
+        </button>
       </header>
 
-      {/* Main Game Area - Added top padding to account for fixed header */}
-      <main className="flex-1 overflow-y-auto pt-12 pb-0 px-0 sm:px-4 md:px-6 flex items-start justify-center">
+      {/* Main Game Area - No top padding since header is on the side */}
+      <main className="flex-1 overflow-y-auto pt-2 pb-0 px-0 sm:px-4 md:px-6 flex items-start justify-center">
         <div className="w-full max-w-5xl animate-fade-in relative z-0">
            {renderGame()}
         </div>
