@@ -632,9 +632,9 @@ export const LudoBoard: React.FC = () => {
   const canInteractWithDice = !rolling && !canMove && !winner && isMyTurnColor;
 
   return (
-    <div className="relative flex flex-col items-center justify-center w-full gap-4 pb-10 select-none px-0 sm:px-4">
+    <div className="relative flex flex-col items-center w-full gap-0 pb-2 select-none px-0 sm:px-4">
       
-      {/* VERTICAL HUD (Fixed on Left) */}
+      {/* LEFT HUD - Buttons & Turn Indicators */}
       <div className="fixed left-2 sm:left-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-3 sm:gap-4 z-40 bg-slate-900/60 p-2 sm:p-3 rounded-full backdrop-blur-md border border-white/10 shadow-2xl">
            
            <button 
@@ -669,20 +669,35 @@ export const LudoBoard: React.FC = () => {
                    </div>
                )
            })}
+      </div>
 
+      {/* RIGHT HUD - Status, Message & Team Info */}
+      <div className="fixed right-2 sm:right-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-3 z-40 pointer-events-none">
+           
+           {/* Game Message */}
+           <div className="font-bold text-slate-700 dark:text-slate-300 text-xs sm:text-sm animate-fade-in bg-slate-200/90 dark:bg-slate-800/90 px-4 py-1.5 rounded-full backdrop-blur-md shadow-lg border border-white/10 whitespace-nowrap max-w-[120px] sm:max-w-none text-center truncate">
+              {message}
+           </div>
+
+           {/* Waiting for opponent */}
+           {!isMyTurnColor && !winner && isConnected && (
+               <div className="bg-amber-500/20 backdrop-blur-sm text-amber-300 text-[10px] sm:text-xs font-bold px-3 py-1.5 rounded-full border border-amber-500/30 shadow-lg animate-pulse whitespace-nowrap">
+                   ⏳ Opponent's turn
+               </div>
+           )}
+           
            {isConnected && (
-               <>
-                   <div className="w-6 h-px bg-slate-600 mx-1 mt-1"></div>
-                   
-                   <div className="flex flex-col items-center gap-1.5 px-1.5 py-3 rounded-full bg-green-500/10 text-green-400 text-[10px] font-bold border border-green-500/20" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+               <div className="flex flex-col items-center gap-2 bg-slate-900/60 p-2 sm:p-3 rounded-2xl backdrop-blur-md border border-white/10 shadow-xl">
+                   {/* LIVE Badge */}
+                   <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/15 text-green-400 text-[10px] font-bold border border-green-500/25">
+                       <Radio className="w-3 h-3 animate-pulse" />
                        <span>LIVE</span>
-                       <Radio className="w-3 h-3 animate-pulse mt-1" />
                    </div>
                    
-                   {/* TEAM INDICATOR */}
-                   <div className="text-[10px] font-bold text-slate-400 flex flex-col gap-1 items-center mt-1">
+                   {/* Team Indicator */}
+                   <div className="text-[10px] font-bold text-slate-400 flex flex-col gap-1 items-center">
                         YOU
-                        <div className="flex flex-col gap-1 mt-1">
+                        <div className="flex gap-1 mt-0.5">
                             {myColors.map(c => (
                                 <div key={c} className={`w-3 h-3 rounded-full ${
                                     c===PlayerColor.RED ? 'bg-red-500' : 
@@ -692,15 +707,8 @@ export const LudoBoard: React.FC = () => {
                             ))}
                         </div>
                    </div>
-               </>
+               </div>
            )}
-      </div>
-
-      {/* GAME MESSAGE (Fixed Top) */}
-      <div className="fixed top-[100px] sm:top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
-         <div className="font-bold text-slate-700 dark:text-slate-300 text-sm animate-fade-in bg-slate-200/90 dark:bg-slate-800/90 px-6 py-1.5 rounded-full backdrop-blur-md shadow-lg border border-white/10">
-            {message}
-         </div>
       </div>
 
       {/* BOARD */}
@@ -734,11 +742,9 @@ export const LudoBoard: React.FC = () => {
                 />
             </div>
             
-            {/* TURN BLOCKED OVERLAY */}
+            {/* TURN BLOCKED OVERLAY - subtle dim only, text moved to right HUD */}
             {!isMyTurnColor && !winner && isConnected && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm text-white text-xs font-bold px-3 py-1 rounded-full z-40 border border-white/20">
-                    Waiting for opponent...
-                </div>
+                <div className="absolute inset-0 bg-black/10 z-40 rounded-[18px] pointer-events-none" />
             )}
           </div>
       </div>
