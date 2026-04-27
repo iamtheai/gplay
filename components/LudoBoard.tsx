@@ -102,6 +102,11 @@ export const LudoBoard: React.FC = () => {
   // Audio Refs
   const tokenAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Refs to always hold latest state for PeerJS callbacks (avoids stale closures)
+  const handleIncomingActionRef = useRef<(action: GameAction) => void>(() => {});
+  const stateRef = useRef({ tokens, turn, diceValue, canMove, winner });
+  stateRef.current = { tokens, turn, diceValue, canMove, winner };
+
   const turnOrder = [PlayerColor.GREEN, PlayerColor.RED, PlayerColor.BLUE, PlayerColor.YELLOW];
 
   // --- MULTIPLAYER LOGIC ---
@@ -149,9 +154,10 @@ export const LudoBoard: React.FC = () => {
           peer.on('connection', (conn: any) => {
               setupConnection(conn);
               setTimeout(() => {
+                 const s = stateRef.current;
                  conn.send({
                      type: 'SYNC_STATE',
-                     state: { tokens, turn, diceValue, canMove, winner }
+                     state: { tokens: s.tokens, turn: s.turn, diceValue: s.diceValue, canMove: s.canMove, winner: s.winner }
                  });
               }, 500);
           });
@@ -177,7 +183,7 @@ export const LudoBoard: React.FC = () => {
       });
 
       conn.on('data', (data: GameAction) => {
-          handleIncomingAction(data);
+          handleIncomingActionRef.current(data);
       });
 
       conn.on('close', () => {
@@ -201,8 +207,8 @@ export const LudoBoard: React.FC = () => {
               if (diceComponentRef.current) {
                   diceComponentRef.current.simulateRoll(action.value);
               }
-              // 2. Wait for animation (simulated delay matches animation duration)
-              // The component itself is 1s animation. We update state AFTER animation visually lands.
+              // 2. Wait for animation, then process result using a synthetic action
+              // to ensure we use the latest state (avoid stale closure in setTimeout)
               setTimeout(() => {
                   processDiceResult(action.value);
               }, 1000);
@@ -227,6 +233,8 @@ export const LudoBoard: React.FC = () => {
               break;
       }
   };
+  // Keep ref updated every render so PeerJS callback always calls latest version
+  handleIncomingActionRef.current = handleIncomingAction;
 
   const playTokenSound = () => {
       if (tokenAudioRef.current) {
