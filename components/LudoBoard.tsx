@@ -711,8 +711,11 @@ export const LudoBoard: React.FC = () => {
            )}
       </div>
 
-      {/* BOARD */}
-      <div className="relative w-full max-w-[700px] aspect-square rounded-[30px] bg-slate-800 dark:bg-slate-700 p-2 sm:p-3 shadow-2xl">
+      {/* BOARD — auto-fits to any screen */}
+      <div 
+        className="relative aspect-square rounded-[30px] bg-slate-800 dark:bg-slate-700 p-2 sm:p-3 shadow-2xl mx-auto"
+        style={{ width: 'min(95vw, calc(100vh - 50px))', maxWidth: '700px' }}
+      >
           <div className="relative w-full h-full bg-white rounded-[22px] sm:rounded-[18px] overflow-hidden">
             <BaseArea color="green" position="top-left" />
             <BaseArea color="red" position="top-right" />
