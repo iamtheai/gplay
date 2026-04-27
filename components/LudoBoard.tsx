@@ -635,6 +635,7 @@ export const LudoBoard: React.FC = () => {
                     ref={diceComponentRef}
                     onLand={onDiceLanded} 
                     canRoll={canInteractWithDice} 
+                    turn={turn}
                 />
             </div>
             
@@ -705,7 +706,8 @@ export const LudoBoard: React.FC = () => {
 const ThreeDDice = forwardRef<{ simulateRoll: (val: number) => void }, { 
     onLand: (val: number) => void; 
     canRoll: boolean;
-}>(({ onLand, canRoll }, ref) => {
+    turn: PlayerColor;
+}>(({ onLand, canRoll, turn }, ref) => {
     const diceRef = useRef<HTMLDivElement>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -811,34 +813,46 @@ const ThreeDDice = forwardRef<{ simulateRoll: (val: number) => void }, {
         }
     }, [canRoll]);
 
+    const getPositionClass = () => {
+        switch(turn) {
+            case PlayerColor.GREEN: return 'top-[20%] left-[20%]';
+            case PlayerColor.RED: return 'top-[20%] left-[80%]';
+            case PlayerColor.YELLOW: return 'top-[80%] left-[20%]';
+            case PlayerColor.BLUE: return 'top-[80%] left-[80%]';
+            default: return 'top-1/2 left-1/2';
+        }
+    };
+
     return (
-        <div className="w-full h-full flex items-center justify-center perspective-container pointer-events-none">
-            <div 
-                ref={diceRef}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                className={`dice-cube cursor-grab active:cursor-grabbing ${!canRoll ? 'opacity-50 grayscale' : ''}`}
-                style={{
-                    transform: isDragging 
-                        ? `translate(${position.x}px, ${position.y}px) rotateX(25deg) rotateY(45deg) scale(1.1)` 
-                        : diceRef.current?.style.transform || `rotateX(25deg) rotateY(45deg)`,
-                    pointerEvents: canRoll ? 'auto' : 'none'
-                }}
-            >
-                <div className="face front"> <DotPattern val={1} /> </div>
-                <div className="face back"> <DotPattern val={6} /> </div>
-                <div className="face right"> <DotPattern val={5} /> </div>
-                <div className="face left"> <DotPattern val={2} /> </div>
-                <div className="face top"> <DotPattern val={3} /> </div>
-                <div className="face bottom"> <DotPattern val={4} /> </div>
-            </div>
-            
-            {canRoll && !isDragging && !isRolling && (
-                <div className="absolute top-2/3 animate-bounce text-xs font-bold text-white bg-black/50 px-2 py-1 rounded-full pointer-events-none shadow-lg backdrop-blur-sm">
-                    Drag & Throw!
+        <div className="w-full h-full absolute inset-0 perspective-container pointer-events-none">
+            <div className={`absolute transition-all duration-500 ease-in-out ${getPositionClass()} -translate-x-1/2 -translate-y-1/2`}>
+                <div 
+                    ref={diceRef}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    className={`dice-cube cursor-grab active:cursor-grabbing ${!canRoll ? 'opacity-50 grayscale' : ''}`}
+                    style={{
+                        transform: isDragging 
+                            ? `translate(${position.x}px, ${position.y}px) rotateX(25deg) rotateY(45deg) scale(1.1)` 
+                            : diceRef.current?.style.transform || `rotateX(25deg) rotateY(45deg)`,
+                        pointerEvents: canRoll ? 'auto' : 'none'
+                    }}
+                >
+                    <div className="face front"> <DotPattern val={1} /> </div>
+                    <div className="face back"> <DotPattern val={6} /> </div>
+                    <div className="face right"> <DotPattern val={5} /> </div>
+                    <div className="face left"> <DotPattern val={2} /> </div>
+                    <div className="face top"> <DotPattern val={3} /> </div>
+                    <div className="face bottom"> <DotPattern val={4} /> </div>
                 </div>
-            )}
+                
+                {canRoll && !isDragging && !isRolling && (
+                    <div className="absolute top-[120%] left-1/2 -translate-x-1/2 animate-bounce text-xs font-bold text-white bg-black/50 px-2 py-1 rounded-full pointer-events-none shadow-lg backdrop-blur-sm whitespace-nowrap">
+                        Drag & Throw!
+                    </div>
+                )}
+            </div>
             <style>{`
                 .perspective-container { perspective: 800px; }
                 .dice-cube {
