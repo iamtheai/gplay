@@ -78,9 +78,9 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Game Area - Added top padding to account for fixed header */}
-      <main className="flex-1 overflow-y-auto pt-28 pb-6 px-0 sm:px-4 md:px-6 flex items-start justify-center">
+      <main className="flex-1 overflow-y-auto pt-20 sm:pt-24 pb-2 sm:pb-6 px-0 sm:px-4 md:px-6 flex items-start justify-center">
         <div className="w-full max-w-5xl animate-fade-in relative z-0">
-          {renderGame()}
+           {renderGame()}
         </div>
       </main>
     </div>

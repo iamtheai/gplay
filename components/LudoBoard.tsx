@@ -249,6 +249,8 @@ export const LudoBoard: React.FC = () => {
       });
   };
 
+  const rollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleIncomingAction = (action: GameAction) => {
       console.log('Received Action:', action);
       
@@ -257,12 +259,14 @@ export const LudoBoard: React.FC = () => {
               if (diceComponentRef.current) {
                   diceComponentRef.current.simulateRoll(action.value);
               }
-              setTimeout(() => {
+              if (rollTimeoutRef.current) clearTimeout(rollTimeoutRef.current);
+              rollTimeoutRef.current = setTimeout(() => {
                   processDiceResult(action.value);
               }, 1000);
               break;
 
           case 'MOVE_TOKEN':
+               if (rollTimeoutRef.current) clearTimeout(rollTimeoutRef.current);
                playTokenSound();
                const pTokens = [...tokens[action.color]];
                const tIndex = pTokens.findIndex(t => t.id === action.tokenId);
@@ -272,6 +276,7 @@ export const LudoBoard: React.FC = () => {
                break;
 
           case 'SYNC_STATE':
+              if (rollTimeoutRef.current) clearTimeout(rollTimeoutRef.current);
               setTokens(action.state.tokens);
               setTurn(action.state.turn);
               setDiceValue(action.state.diceValue);
@@ -280,6 +285,7 @@ export const LudoBoard: React.FC = () => {
               break;
               
           case 'QUIT_GAME':
+              if (rollTimeoutRef.current) clearTimeout(rollTimeoutRef.current);
               clearGameState();
               break;
       }
@@ -628,27 +634,29 @@ export const LudoBoard: React.FC = () => {
   return (
     <div className="relative flex flex-col items-center justify-center w-full gap-4 pb-10 select-none px-0 sm:px-4">
       
-      {/* HUD */}
-      <div className="w-full max-w-[700px] flex justify-end items-center gap-3 mb-2 px-4 sm:px-2 z-40">
+      {/* VERTICAL HUD (Fixed on Left) */}
+      <div className="fixed left-2 sm:left-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-3 sm:gap-4 z-40 bg-slate-900/60 p-2 sm:p-3 rounded-full backdrop-blur-md border border-white/10 shadow-2xl">
+           
+           <button 
+                onClick={handleInviteClick}
+                className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md transition-all active:scale-95 border border-white/20"
+                title="Share Game"
+           >
+                <Share2 className="w-5 h-5 text-white" />
+           </button>
+
            {isConnected && (
-               <div className="mr-auto flex items-center gap-2">
-                   <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 text-xs font-bold border border-green-500/20">
-                       <Radio className="w-3 h-3 animate-pulse" />
-                       <span>LIVE</span>
-                   </div>
-                   {/* TEAM INDICATOR */}
-                   <div className="text-xs font-bold text-slate-500 dark:text-slate-400 flex gap-1">
-                        YOU: 
-                        {myColors.map(c => (
-                            <div key={c} className={`w-3 h-3 rounded-full ${
-                                c===PlayerColor.RED ? 'bg-red-500' : 
-                                c===PlayerColor.GREEN ? 'bg-green-500' : 
-                                c===PlayerColor.BLUE ? 'bg-blue-500' : 'bg-yellow-400'
-                            }`} />
-                        ))}
-                   </div>
-               </div>
+               <button 
+                    onClick={quitGame}
+                    className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 shadow-md transition-all active:scale-95 border border-white/20"
+                    title="Quit Game"
+               >
+                    <X className="w-5 h-5 text-white" />
+               </button>
            )}
+
+           <div className="w-6 h-px bg-slate-600 mx-1"></div>
+
            {turnOrder.map((color) => {
                const isTurn = turn === color;
                return (
@@ -662,30 +670,35 @@ export const LudoBoard: React.FC = () => {
                )
            })}
 
-           <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
-
            {isConnected && (
-               <button 
-                    onClick={quitGame}
-                    className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 shadow-md transition-all active:scale-95 border border-white/20 mr-1"
-                    title="Quit Game"
-               >
-                    <X className="w-5 h-5 text-white" />
-               </button>
+               <>
+                   <div className="w-6 h-px bg-slate-600 mx-1 mt-1"></div>
+                   
+                   <div className="flex flex-col items-center gap-1.5 px-1.5 py-3 rounded-full bg-green-500/10 text-green-400 text-[10px] font-bold border border-green-500/20" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
+                       <span>LIVE</span>
+                       <Radio className="w-3 h-3 animate-pulse mt-1" />
+                   </div>
+                   
+                   {/* TEAM INDICATOR */}
+                   <div className="text-[10px] font-bold text-slate-400 flex flex-col gap-1 items-center mt-1">
+                        YOU
+                        <div className="flex flex-col gap-1 mt-1">
+                            {myColors.map(c => (
+                                <div key={c} className={`w-3 h-3 rounded-full ${
+                                    c===PlayerColor.RED ? 'bg-red-500' : 
+                                    c===PlayerColor.GREEN ? 'bg-green-500' : 
+                                    c===PlayerColor.BLUE ? 'bg-blue-500' : 'bg-yellow-400'
+                                }`} />
+                            ))}
+                        </div>
+                   </div>
+               </>
            )}
-
-           <button 
-                onClick={handleInviteClick}
-                className="group relative flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md transition-all active:scale-95 border border-white/20"
-                title="Share Game"
-           >
-                <Share2 className="w-4 h-4 text-white" />
-           </button>
       </div>
 
-      {/* GAME MESSAGE */}
-      <div className="h-6 flex items-center justify-center">
-         <div className="font-bold text-slate-700 dark:text-slate-300 text-sm animate-fade-in bg-slate-200/50 dark:bg-slate-800/50 px-4 py-1 rounded-full backdrop-blur-sm">
+      {/* GAME MESSAGE (Fixed Top) */}
+      <div className="fixed top-[100px] sm:top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+         <div className="font-bold text-slate-700 dark:text-slate-300 text-sm animate-fade-in bg-slate-200/90 dark:bg-slate-800/90 px-6 py-1.5 rounded-full backdrop-blur-md shadow-lg border border-white/10">
             {message}
          </div>
       </div>
